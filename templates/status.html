@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}{{ state.scan_name }} — status{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ state.scan_name }} <span class="muted small">/ {{ state.customer }}</span></h1>
+  <a class="btn btn-ghost" id="report-link" href="{{ url_for('scan_report', scan_id=state.id) }}"
+     style="{% if not state.report %}display:none{% endif %}">View report</a>
+</div>
+
+<section class="panel" id="scan-status" data-scan-id="{{ state.id }}">
+  <div class="status-row">
+    <span class="status status-{{ state.status }}" id="st-status">{{ state.status }}</span>
+    <span class="muted" id="st-phase">{{ state.phase }}</span>
+    {% if state.demo %}<span class="tag">demo</span>{% endif %}
+  </div>
+  <div class="progress"><div class="bar" id="st-bar" style="width:0%"></div></div>
+  <div class="small muted" id="st-progress"></div>
+  {% if state.error %}<div class="flash flash-error" id="st-error">{{ state.error }}</div>{% endif %}
+
+  <h3>Scope ({{ state.targets|length }})</h3>
+  <div class="scope-list">{% for t in state.targets %}<span class="pill">{{ t }}</span>{% endfor %}</div>
+
+  <h3>Modules</h3>
+  <table class="grid" id="st-modules">
+    <thead><tr><th>Module</th><th>Status</th><th>Runs</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <h3>Activity log</h3>
+  <pre class="log" id="st-log"></pre>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+  window.RECON = {
+    statusUrl: "{{ url_for('api_scan_status', scan_id=state.id) }}",
+    reportUrl: "{{ url_for('scan_report', scan_id=state.id) }}"
+  };
+</script>
+{% endblock %}

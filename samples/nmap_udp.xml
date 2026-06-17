@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nmaprun scanner="nmap" args="nmap -Pn -sU --top-ports 1000 --open -sV -oA nmap/udp -iL targets.txt" version="7.94">
+  <host>
+    <status state="up"/>
+    <address addr="192.0.2.10" addrtype="ipv4"/>
+    <hostnames><hostname name="web.example.com" type="user"/></hostnames>
+    <ports>
+      <port protocol="udp" portid="161">
+        <state state="open"/>
+        <service name="snmp" product="SNMPv1 server" extrainfo="public"/>
+      </port>
+    </ports>
+  </host>
+</nmaprun>

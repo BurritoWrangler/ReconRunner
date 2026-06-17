@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}New scan — recon-runner{% endblock %}
+{% block content %}
+<div class="page-head"><h1>New scan</h1></div>
+
+<form method="post" action="{{ url_for('create_scan') }}" enctype="multipart/form-data"
+      id="scan-form">
+
+  <section class="panel">
+    <h2>Scope &amp; global settings</h2>
+    <div class="row">
+      <label>Scan name
+        <input type="text" name="scan_name" value="{{ gvals.scan_name }}" required>
+      </label>
+      <label>Customer name <span class="req">*</span>
+        <input type="text" name="customer_name" value="{{ gvals.customer_name }}" placeholder="acme-corp" required>
+        <small>Output is written to <code>results_&lt;customer&gt;/</code>.</small>
+      </label>
+    </div>
+    <div class="row">
+      <label class="grow">Targets — one IP or FQDN per line
+        <textarea name="targets" rows="6" placeholder="192.0.2.10&#10;mail.example.com&#10;vpn.example.com">{{ gvals.targets }}</textarea>
+      </label>
+      <label class="grow">…or upload a host file
+        <input type="file" name="hostfile" accept=".txt,.lst,text/plain">
+        <small>If both are given, the uploaded file is used.</small>
+      </label>
+    </div>
+    <div class="row">
+      <label class="check"><input type="checkbox" name="run_as_root" {% if gvals.run_as_root %}checked{% endif %}>
+        Running as root (use nmap <code>-sS</code>; unticked falls back to <code>-sT</code>)</label>
+    </div>
+    <div class="row">
+      <label>Per-module timeout (s)<input type="number" name="module_timeout" value="{{ gvals.module_timeout }}" min="30"></label>
+      <label>Max concurrency<input type="number" name="max_concurrency" value="{{ gvals.max_concurrency }}" min="1"></label>
+      <label>Global rate limit<input type="number" name="rate_limit" value="{{ gvals.rate_limit }}" min="1"></label>
+      <label>Report theme
+        <select name="report_theme">
+          <option value="dark" {% if gvals.report_theme != 'light' %}selected{% endif %}>Dark (hacker)</option>
+          <option value="light" {% if gvals.report_theme == 'light' %}selected{% endif %}>Light (printable)</option>
+        </select>
+      </label>
+    </div>
+    <div class="row auth">
+      <label class="check"><input type="checkbox" name="authorized" {% if gvals.authorized %}checked{% endif %} required>
+        <strong>I am authorized to test these targets.</strong> <span class="req">*</span></label>
+    </div>
+  </section>
+
+  {% for phase in phases %}
+  <section class="panel">
+    <h2>{{ phase.label }}</h2>
+    {% for m in phase.modules %}
+    <div class="module-card" data-mid="{{ m.id }}" data-risk="{{ m.risk }}">
+      <div class="mod-head">
+        <label class="check mod-toggle">
+          <input type="checkbox" name="mod__{{ m.id }}__enabled" {% if m.enabled %}checked{% endif %}>
+          <span class="mod-name">{{ m.name }}</span>
+        </label>
+        <span class="avail {{ 'ok' if m.available else 'no' }}"
+              title="{% for b,present in m.binaries.items() %}{{ b }}: {{ 'found' if present else 'missing' }}&#10;{% endfor %}">
+          {{ m.binary }}{% if not m.available %} — not found{% endif %}
+        </span>
+      </div>
+      <p class="mod-desc">{{ m.description }}</p>
+      <p class="mod-why"><strong>Why:</strong> {{ m.why }}</p>
+      {% if m.risk == 'intrusive' %}<p class="warn">Intrusive — requires explicit per-module authorization below.</p>{% endif %}
+      {% if m.risk == 'scope' %}<p class="warn scope">Not nmap-gated — can expand scope. Off by default.</p>{% endif %}
+
+      {% if m.options %}
+      <div class="opts">
+        {% for o in m.options %}
+        {% set fname = "mod__" ~ m.id ~ "__" ~ o.key %}
+        <label class="opt-label {{ 'check' if o.type == 'bool' else '' }}">
+          {% if o.type == 'bool' %}
+            <input class="opt" type="checkbox" name="{{ fname }}"
+                   {% if m.optvals.get(o.key) %}checked{% endif %}> {{ o.label }}
+          {% elif o.type == 'select' %}
+            {{ o.label }}
+            <select class="opt" name="{{ fname }}">
+              {% for c in o.choices %}
+              <option value="{{ c }}" {% if m.optvals.get(o.key)|string == c|string %}selected{% endif %}>{{ c }}</option>
+              {% endfor %}
+            </select>
+          {% elif o.type == 'int' %}
+            {{ o.label }}
+            <input class="opt" type="number" name="{{ fname }}" value="{{ m.optvals.get(o.key) }}">
+          {% else %}
+            {{ o.label }}
+            <input class="opt" type="text" name="{{ fname }}" value="{{ m.optvals.get(o.key) }}">
+          {% endif %}
+          {% if o.help %}<small>{{ o.help }}</small>{% endif %}
+        </label>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <div class="preview">
+        <span class="preview-label">Command{{ 's' if m.preview|length > 1 else '' }}:</span>
+        <pre id="preview-{{ m.id }}" class="cmd">{{ m.preview|join('\n') }}</pre>
+      </div>
+    </div>
+    {% endfor %}
+  </section>
+  {% endfor %}
+
+  <div class="submit-bar">
+    <button class="btn btn-lg" type="submit">Start scan</button>
+    <span class="small muted">Every active test runs only against services nmap finds open.</span>
+  </div>
+</form>
+{% endblock %}
+{% block scripts %}
+<script>window.RECON = {previewUrl: "{{ url_for('api_command_preview') }}"};</script>
+{% endblock %}

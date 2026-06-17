@@ -1,0 +1,10 @@
+# Web app:
+Flask>=3.0
+
+# Report rendering - used by BOTH the web app and the CLI.
+# (Flask already depends on Jinja2; listed explicitly so a CLI-only install,
+#  e.g. `pip install Jinja2`, works without Flask.)
+Jinja2>=3.1
+
+# Dev/test only (not required at runtime):
+#   pytest

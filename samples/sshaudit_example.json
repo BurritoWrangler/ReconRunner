@@ -1,0 +1,14 @@
+{
+  "banner": {"raw": "SSH-2.0-OpenSSH_7.4"},
+  "cves": [
+    {"name": "CVE-2018-15473", "cvssv2": 5.0,
+     "description": "OpenSSH username enumeration via malformed packets"}
+  ],
+  "enc": [
+    {"algorithm": "3des-cbc", "notes": {"fail": ["using weak cipher"], "warn": []}},
+    {"algorithm": "aes256-ctr", "notes": {}}
+  ],
+  "mac": [
+    {"algorithm": "hmac-md5", "notes": {"fail": ["using weak hashing algorithm"]}}
+  ]
+}

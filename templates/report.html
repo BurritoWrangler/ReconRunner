@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pentest report — {{ customer }} — {{ scan_name }}</title>
+{% if theme == 'light' %}
+<style>
+  :root{
+    --bg:#0f1419; --panel:#fff; --ink:#1b2733; --muted:#5b6b7b; --line:#e3e8ee;
+    --crit:#b00020; --high:#e8590c; --med:#e0a800; --low:#1f9bcf; --info:#6c757d;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:15px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+       color:var(--ink);background:#f4f6f8}
+  .wrap{max-width:1080px;margin:0 auto;padding:32px 20px 80px}
+  header.rep{background:var(--bg);color:#e6edf3;padding:28px 20px;border-radius:10px}
+  header.rep h1{margin:0 0 4px;font-size:24px}
+  header.rep .meta{color:#9fb0c0;font-size:13px}
+  .demo{background:var(--med);color:#1b2733;padding:6px 12px;border-radius:6px;
+        display:inline-block;font-weight:600;margin-top:10px}
+  h2{margin:34px 0 12px;font-size:19px;border-bottom:2px solid var(--line);padding-bottom:6px}
+  table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);
+        border-radius:8px;overflow:hidden}
+  th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:#f0f3f7;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+  tr:last-child td{border-bottom:none}
+  code{background:#eef2f6;padding:1px 5px;border-radius:4px;font-size:12.5px}
+  .badge{display:inline-block;padding:2px 8px;border-radius:999px;color:#fff;font-size:11px;
+         font-weight:700;text-transform:uppercase;letter-spacing:.03em}
+  .sev-critical{background:var(--crit)} .sev-high{background:var(--high)}
+  .sev-medium{background:var(--med);color:#1b2733} .sev-low{background:var(--low)}
+  .sev-info{background:var(--info)}
+  .cards{display:flex;gap:10px;flex-wrap:wrap;margin:8px 0 4px}
+  .card{flex:1 1 140px;background:var(--panel);border:1px solid var(--line);border-radius:8px;
+        padding:14px;text-align:center}
+  .card .n{font-size:28px;font-weight:700} .card .l{font-size:12px;color:var(--muted)}
+  .pill{display:inline-block;background:#eef2f6;border:1px solid var(--line);border-radius:6px;
+        padding:1px 6px;margin:1px;font-size:12px}
+  .muted{color:var(--muted)} .small{font-size:12.5px}
+  .exploit{color:var(--crit);font-weight:700}
+  .gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
+  .shot{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .shot img{width:100%;height:180px;object-fit:cover;border-bottom:1px solid var(--line);background:#222}
+  .shot .cap{padding:8px 10px;font-size:12.5px;word-break:break-all}
+  details{margin-top:6px} summary{cursor:pointer;color:var(--muted)}
+  .refs a{color:#1f6feb;text-decoration:none;font-size:12px}
+  footer{margin-top:40px;color:var(--muted);font-size:12px;text-align:center}
+</style>
+{% else %}
+<style>
+  :root{
+    --bg:#05080a; --panel:#0a110d; --ink:#b9c9bd; --bright:#d8ffe4; --muted:#5f7568;
+    --line:rgba(0,255,156,.16); --accent:#00ff9c; --accent2:#39d0ff;
+    --crit:#ff2e63; --high:#ff7b1a; --med:#ffd400; --low:#34d1ff; --info:#7d8c84;
+    --mono:'JetBrains Mono','Fira Code',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.55 var(--mono);color:var(--ink);
+       background-color:var(--bg);
+       background-image:linear-gradient(rgba(0,255,156,.035) 1px,transparent 1px),
+         linear-gradient(90deg,rgba(0,255,156,.035) 1px,transparent 1px);
+       background-size:30px 30px}
+  .wrap{max-width:1080px;margin:0 auto;padding:32px 20px 80px}
+  header.rep{background:linear-gradient(180deg,#04110b,#0a0f0c);color:var(--bright);
+       padding:26px 22px;border:1px solid var(--line);border-radius:10px;
+       box-shadow:0 0 26px rgba(0,255,156,.08)}
+  header.rep h1{margin:0 0 6px;font-size:22px;color:var(--bright);
+       text-shadow:0 0 10px rgba(0,255,156,.25)}
+  header.rep h1::before{content:"$ ";color:var(--accent)}
+  header.rep .meta{color:#8fa79a;font-size:12.5px}
+  header.rep .meta strong{color:var(--accent)}
+  .demo{background:var(--med);color:#1a1600;padding:6px 12px;border-radius:6px;
+        display:inline-block;font-weight:700;margin-top:10px}
+  h2{margin:34px 0 12px;font-size:17px;color:var(--bright);
+     border-bottom:1px dashed var(--line);padding-bottom:6px}
+  h2::before{content:"// ";color:var(--accent)}
+  table{width:100%;border-collapse:collapse;background:#0a0f0c;border:1px solid var(--line);
+        border-radius:8px;overflow:hidden}
+  th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:#04130c;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--accent)}
+  tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:rgba(0,255,156,.04)}
+  code{background:#02110a;color:var(--accent);border:1px solid var(--line);
+       padding:1px 5px;border-radius:4px;font-size:12.5px}
+  .badge{display:inline-block;padding:2px 8px;border-radius:999px;color:#04130c;font-size:11px;
+         font-weight:700;text-transform:uppercase;letter-spacing:.03em}
+  .sev-critical{background:var(--crit);color:#fff} .sev-high{background:var(--high);color:#1a0d02}
+  .sev-medium{background:var(--med);color:#1a1600} .sev-low{background:var(--low);color:#04161c}
+  .sev-info{background:var(--info);color:#06120c}
+  .cards{display:flex;gap:10px;flex-wrap:wrap;margin:8px 0 4px}
+  .card{flex:1 1 140px;background:#0a110d;border:1px solid var(--line);border-radius:8px;
+        padding:14px;text-align:center}
+  .card .n{font-size:26px;font-weight:700;color:var(--bright)}
+  .card .l{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  .pill{display:inline-block;background:#02110a;border:1px solid var(--line);border-radius:6px;
+        padding:1px 6px;margin:1px;font-size:12px;color:var(--ink)}
+  .muted{color:var(--muted)} .small{font-size:12.5px}
+  .exploit{color:var(--crit);font-weight:700}
+  .gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
+  .shot{background:#0a110d;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .shot img{width:100%;height:180px;object-fit:cover;border-bottom:1px solid var(--line);background:#02110a}
+  .shot .cap{padding:8px 10px;font-size:12.5px;word-break:break-all}
+  details{margin-top:6px} summary{cursor:pointer;color:var(--accent)}
+  .refs a{color:var(--accent2);text-decoration:none;font-size:12px}
+  footer{margin-top:40px;color:var(--muted);font-size:12px;text-align:center;
+         border-top:1px dashed var(--line);padding-top:14px}
+</style>
+{% endif %}
+</head>
+<body>
+<div class="wrap">
+  <header class="rep">
+    <h1>External Network Penetration Test</h1>
+    <div class="meta">
+      <strong>Customer:</strong> {{ customer }} &nbsp;·&nbsp;
+      <strong>Scan:</strong> {{ scan_name }} &nbsp;·&nbsp;
+      <strong>ID:</strong> {{ scan_id }}<br>
+      <strong>Generated:</strong> {{ generated }}
+      {% if duration %} &nbsp;·&nbsp; <strong>Duration:</strong> {{ duration }}s{% endif %}
+      &nbsp;·&nbsp; <strong>Scope:</strong> {{ targets|length }} target(s),
+      {{ host_count }} live host(s), {{ service_count }} open service(s)
+    </div>
+    {% if demo %}<div class="demo">DEMO REPORT — generated from bundled sample data</div>{% endif %}
+  </header>
+
+  <h2>Executive summary</h2>
+  <div class="cards">
+    {% for sev in severities %}
+    <div class="card">
+      <div class="n"><span class="badge sev-{{ sev }}">{{ summary.get(sev, 0) }}</span></div>
+      <div class="l">{{ sev|capitalize }}</div>
+    </div>
+    {% endfor %}
+    <div class="card"><div class="n">{{ total_findings }}</div><div class="l">Total findings</div></div>
+  </div>
+
+  <h2>Prioritized findings</h2>
+  {% if findings %}
+  <table>
+    <thead><tr><th>#</th><th>Severity</th><th>Finding</th><th>Asset(s)</th>
+    <th>Score</th><th>Source</th></tr></thead>
+    <tbody>
+    {% for f in findings %}
+      <tr>
+        <td>{{ f.rank }}</td>
+        <td><span class="badge sev-{{ f.severity }}">{{ f.severity }}</span>
+            {% if f.exploitable %}<div class="small exploit">exploit</div>{% endif %}</td>
+        <td>
+          <strong>{{ f.title }}</strong>
+          {% if f.evidence %}<div class="small muted">{{ f.evidence }}</div>{% endif %}
+          {% if f.remediation %}<div class="small"><em>Fix:</em> {{ f.remediation }}</div>{% endif %}
+          {% if f.references %}<div class="refs">
+            {% for r in f.references %}{% if r.startswith('http') %}
+              <a href="{{ r }}">{{ r }}</a>{% else %}<span class="pill">{{ r }}</span>{% endif %}
+            {% endfor %}</div>{% endif %}
+        </td>
+        <td class="small">{% for a in f.assets %}<div>{{ a }}</div>{% else %}—{% endfor %}</td>
+        <td>{{ f.score }}</td>
+        <td class="small">{{ f.source_tools|join(', ') }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">No findings recorded.</p>{% endif %}
+
+  <h2>Open services</h2>
+  {% if services %}
+  <table>
+    <thead><tr><th>Host</th><th>Port</th><th>Proto</th><th>Service</th>
+    <th>Product / version</th><th>TLS</th></tr></thead>
+    <tbody>
+    {% for s in services %}
+      <tr>
+        <td>{{ s.host }}</td><td>{{ s.port }}</td><td>{{ s.proto }}</td>
+        <td>{{ s.name or '—' }}</td>
+        <td>{{ (s.product ~ ' ' ~ s.version)|trim or '—' }}</td>
+        <td>{{ 'yes' if s.tls else '' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">No open services discovered.</p>{% endif %}
+
+  <h2>Outdated / version-flagged software</h2>
+  <p class="small muted">Heuristic: software with a detected version, flagged where a
+  public exploit or known-vuln match exists. Confirm against vendor advisories.</p>
+  {% if outdated %}
+  <table>
+    <thead><tr><th>Asset</th><th>Product</th><th>Version</th><th>Source</th>
+    <th>Known issue?</th></tr></thead>
+    <tbody>
+    {% for r in outdated %}
+      <tr>
+        <td>{{ r.asset or '—' }}</td><td>{{ r.product }}</td><td>{{ r.version }}</td>
+        <td class="small">{{ r.source }}</td>
+        <td>{% if r.known_issue %}<span class="badge sev-high">yes</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">No software versions were detected.</p>{% endif %}
+
+  {% if screenshots %}
+  <h2>Web screenshots</h2>
+  <div class="gallery">
+    {% for sc in screenshots %}
+    <div class="shot">
+      <img src="{{ sc.img }}" alt="screenshot of {{ sc.url }}">
+      <div class="cap"><strong>{{ sc.status or '' }}</strong> {{ sc.url }}
+        {% if sc.title %}<div class="muted">{{ sc.title }}</div>{% endif %}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <h2>Appendix — tools executed</h2>
+  {% if appendix %}
+  <details open><summary>{{ appendix|length }} command(s) — full stdout/stderr saved under <code>logs/</code></summary>
+  <table>
+    <thead><tr><th>Module</th><th>Command</th><th>Status</th><th>Duration</th></tr></thead>
+    <tbody>
+    {% for a in appendix %}
+      <tr><td class="small">{{ a.module }}</td>
+          <td><code class="small">{{ a.command }}</code></td>
+          <td class="small">{{ a.status }}</td>
+          <td class="small">{{ a.duration if a.duration is not none else '' }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </details>
+  {% else %}<p class="muted">No tool runs recorded.</p>{% endif %}
+
+  <footer>Generated by recon-runner · Authorized testing only.</footer>
+</div>
+</body>
+</html>

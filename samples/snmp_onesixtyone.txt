@@ -1,0 +1,2 @@
+192.0.2.10 [public] Linux web.example.com 5.4.0-91-generic #102-Ubuntu SMP x86_64
+192.0.2.10 [private] Linux web.example.com 5.4.0-91-generic #102-Ubuntu SMP x86_64

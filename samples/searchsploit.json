@@ -1,0 +1,13 @@
+{
+  "SEARCH": "Apache httpd 2.4.49",
+  "RESULTS_EXPLOIT": [
+    {
+      "Title": "Apache HTTP Server 2.4.49 - Path Traversal & Remote Code Execution (RCE)",
+      "EDB-ID": "50383",
+      "Date_Published": "2021-10-08",
+      "Path": "/usr/share/exploitdb/exploits/multiple/webapps/50383.sh",
+      "Codes": "CVE-2021-41773"
+    }
+  ],
+  "RESULTS_SHELLCODE": []
+}

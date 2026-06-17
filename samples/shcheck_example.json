@@ -1,0 +1,12 @@
+{
+  "target": "https://192.0.2.10",
+  "present": {
+    "X-Frame-Options": "SAMEORIGIN"
+  },
+  "missing": {
+    "Strict-Transport-Security": "HSTS not set",
+    "Content-Security-Policy": "CSP not set",
+    "X-Content-Type-Options": "nosniff not set",
+    "Referrer-Policy": "not set"
+  }
+}

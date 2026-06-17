@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>recon-runner — config preview</title>
+<link rel="stylesheet" href="../static/css/styles.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="#">recon-runner</a>
+  <nav><a href="#">Scans</a><a class="btn" href="#">+ New scan</a></nav>
+</header>
+<main class="container">
+  <div class="page-head"><h1>New scan</h1></div>
+
+  <section class="panel">
+    <h2>Scope &amp; global settings</h2>
+    <div class="row">
+      <label>Scan name<input type="text" value="external-pentest"></label>
+      <label>Customer name <span class="req">*</span>
+        <input type="text" value="acme-corp">
+        <small>Output is written to <code>results_&lt;customer&gt;/</code>.</small>
+      </label>
+    </div>
+    <div class="row">
+      <label class="grow">Targets — one IP or FQDN per line
+        <textarea rows="4">192.0.2.10
+mail.example.com
+vpn.example.com</textarea></label>
+      <label class="grow">…or upload a host file
+        <input type="file">
+        <small>If both are given, the uploaded file is used.</small></label>
+    </div>
+    <div class="row">
+      <label class="check"><input type="checkbox" checked> Running as root (use nmap <code>-sS</code>)</label>
+    </div>
+    <div class="row">
+      <label>Per-module timeout (s)<input type="number" value="1800"></label>
+      <label>Max concurrency<input type="number" value="8"></label>
+      <label>Global rate limit<input type="number" value="150"></label>
+    </div>
+    <div class="row auth">
+      <label class="check"><input type="checkbox" checked>
+        <strong>I am authorized to test these targets.</strong> <span class="req">*</span></label>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Phase 1 — Discovery (NMAP)</h2>
+    <div class="module-card" data-risk="safe">
+      <div class="mod-head">
+        <label class="check mod-toggle"><input type="checkbox" checked>
+          <span class="mod-name">NMAP — all TCP ports (-p-)</span></label>
+        <span class="avail ok">nmap</span>
+      </div>
+      <p class="mod-desc">Full TCP port sweep with service/version detection.</p>
+      <p class="mod-why"><strong>Why:</strong> Enumerate every listening TCP service and its
+        product/version — this inventory is the basis every other test is gated on.</p>
+      <div class="opts">
+        <label class="opt-label">Scan type
+          <select><option>-sS</option><option>-sT</option></select></label>
+        <label class="opt-label check"><input type="checkbox" checked> All 65535 ports (-p-)</label>
+        <label class="opt-label check"><input type="checkbox" checked> Version detection (-sV)</label>
+        <label class="opt-label">Timing<select><option>T4</option></select></label>
+        <label class="opt-label">Min rate<input type="number" value="0"></label>
+      </div>
+      <div class="preview"><span class="preview-label">Command:</span>
+        <pre class="cmd">nmap -Pn -sS -p- -sV -T4 --open -oA &lt;ws&gt;/nmap/tcp -iL &lt;ws&gt;/targets.txt</pre></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Phase 2 — Web service modules</h2>
+    <div class="module-card" data-risk="safe">
+      <div class="mod-head">
+        <label class="check mod-toggle"><input type="checkbox" checked>
+          <span class="mod-name">Vulnerability scan (nuclei)</span></label>
+        <span class="avail ok">nuclei</span>
+      </div>
+      <p class="mod-desc">Templated detection of CVEs, misconfigurations and exposures.</p>
+      <p class="mod-why"><strong>Why:</strong> Community templates catch known CVEs, default creds,
+        exposed panels and misconfigurations across web services.</p>
+      <div class="opts">
+        <label class="opt-label">Severities<input type="text" value="low,medium,high,critical"></label>
+        <label class="opt-label">Rate limit<input type="number" value="150"></label>
+        <label class="opt-label check"><input type="checkbox"> Automatic/wappalyzer (-as)</label>
+      </div>
+      <div class="preview"><span class="preview-label">Command:</span>
+        <pre class="cmd">nuclei -l &lt;ws&gt;/web_urls.txt -jsonl-export &lt;ws&gt;/nuclei.jsonl -o &lt;ws&gt;/nuclei.txt -stats -severity low,medium,high,critical -rate-limit 150</pre></div>
+    </div>
+    <div class="module-card" data-risk="safe">
+      <div class="mod-head">
+        <label class="check mod-toggle"><input type="checkbox"> <span class="mod-name">TLS audit — JSON cross-check (sslyze)</span></label>
+        <span class="avail no">sslyze — not found</span>
+      </div>
+      <p class="mod-desc">Parse-friendly JSON TLS scan to corroborate sslscan/NSE.</p>
+      <p class="mod-why"><strong>Why:</strong> Second, machine-readable TLS opinion to reduce false positives.</p>
+      <div class="preview"><span class="preview-label">Command:</span>
+        <pre class="cmd">sslyze --json_out=&lt;ws&gt;/sslyze/&lt;host&gt;_&lt;port&gt;.json &lt;host&gt;:&lt;port&gt;</pre></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Intrusive (off by default)</h2>
+    <div class="module-card" data-risk="intrusive">
+      <div class="mod-head">
+        <label class="check mod-toggle"><input type="checkbox"> <span class="mod-name">Credential brute force (hydra / medusa / ncrack)</span></label>
+        <span class="avail ok">hydra</span>
+      </div>
+      <p class="mod-desc">Online password guessing against discovered services.</p>
+      <p class="mod-why"><strong>Why:</strong> Validates weak/default credentials. INTRUSIVE: lockout/availability risk.</p>
+      <p class="warn">Intrusive — requires explicit per-module authorization below.</p>
+      <div class="opts">
+        <label class="opt-label">Tool<select><option>hydra</option><option>medusa</option><option>ncrack</option></select></label>
+        <label class="opt-label">Services<input type="text" value="ssh"></label>
+        <label class="opt-label check"><input type="checkbox"> I explicitly authorize brute forcing</label>
+      </div>
+      <div class="preview"><span class="preview-label">Command:</span>
+        <pre class="cmd">hydra -L &lt;users&gt; -P &lt;passwords&gt; -o &lt;ws&gt;/bruteforce/&lt;host&gt;_ssh.json -b json ssh://&lt;host&gt;:&lt;port&gt;</pre></div>
+    </div>
+  </section>
+
+  <div class="submit-bar">
+    <button class="btn btn-lg">Start scan</button>
+    <span class="small muted">Every active test runs only against services nmap finds open.</span>
+  </div>
+</main>
+</body>
+</html>

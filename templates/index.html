@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Scans — recon-runner{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Scans</h1>
+  <div class="actions">
+    <form method="post" action="{{ url_for('start_demo') }}" style="display:inline">
+      <button class="btn btn-ghost" type="submit">Run demo scan</button>
+    </form>
+    <a class="btn" href="{{ url_for('new_scan') }}">+ New scan</a>
+  </div>
+</div>
+
+{% if scans %}
+<table class="grid">
+  <thead><tr>
+    <th>Created</th><th>Customer</th><th>Scan</th><th>Targets</th>
+    <th>Status</th><th>Findings</th><th></th>
+  </tr></thead>
+  <tbody>
+  {% for s in scans %}
+    <tr>
+      <td class="small">{{ s.created_at_iso or '' }}</td>
+      <td>{{ s.customer }}{% if s.demo %} <span class="tag">demo</span>{% endif %}</td>
+      <td>{{ s.scan_name }}</td>
+      <td class="small">{{ s.targets|length }}</td>
+      <td><span class="status status-{{ s.status }}">{{ s.status }}</span>
+          {% if s.phase and s.status == 'running' %}<span class="small muted">({{ s.phase }})</span>{% endif %}</td>
+      <td class="small">
+        {% set fs = s.findings_summary or {} %}
+        {% if fs.get('total') %}
+          {{ fs.get('total') }}
+          <span class="muted">(C{{ fs.get('critical',0) }}/H{{ fs.get('high',0) }}/M{{ fs.get('medium',0) }})</span>
+        {% else %}—{% endif %}
+      </td>
+      <td class="small">
+        <a href="{{ url_for('scan_status', scan_id=s.id) }}">status</a>
+        {% if s.report %} · <a href="{{ url_for('scan_report', scan_id=s.id) }}">report</a>{% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="empty">
+  <p>No scans yet.</p>
+  <a class="btn" href="{{ url_for('new_scan') }}">Configure your first scan</a>
+  <p class="small muted">No tools installed? Try <strong>Run demo scan</strong> to preview the report.</p>
+</div>
+{% endif %}
+{% endblock %}

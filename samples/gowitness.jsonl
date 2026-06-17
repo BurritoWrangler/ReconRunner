@@ -1,0 +1,2 @@
+{"url":"http://192.0.2.10:80","final_url":"http://192.0.2.10/","response_code":200,"title":"Apache2 Default Page","file_name":"example_80.png","failed":false}
+{"url":"https://192.0.2.10:443","final_url":"https://192.0.2.10/","response_code":403,"title":"403 Forbidden","file_name":"example_443.png","failed":false}
