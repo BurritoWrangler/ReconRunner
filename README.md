@@ -36,6 +36,14 @@ pip install -r requirements.txt
 python app.py            # serves http://127.0.0.1:5000
 ```
 
+On **Kali Linux** (the intended runtime), run the setup script to install
+*everything* in one shot — system packages, the full scanning toolset (apt + Go
+tools), `shcheck.py`, nuclei templates, and the Python virtualenv:
+
+```bash
+./setup.sh            # Kali Linux; uses sudo for system + tool installs
+```
+
 On macOS (or any box without the scanning tools installed) the UI and report can
 still be exercised via **Demo mode** (button on the home page), which renders a
 full report from the bundled sample tool outputs in `samples/`.
