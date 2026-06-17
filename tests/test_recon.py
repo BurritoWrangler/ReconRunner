@@ -6,7 +6,7 @@ command builder, config parsing and report rendering.
 
 import os
 
-from pentest import commands, config, findings, report
+from pentest import commands, config, findings, report, software
 from pentest.config import ScanConfig
 from pentest.findings import Finding
 from pentest.parsers import (gowitness, generic, httpx, nmap, nuclei,
@@ -250,3 +250,54 @@ def test_runner_creates_output_dirs(tmp_path):
     runner._ensure_output_dirs(argv, ws)
     assert (tmp_path / "nmap").is_dir()      # nmap -oA parent
     assert (tmp_path / "sslscan").is_dir()   # sslscan --xml= parent
+
+
+# ---- software version enumeration + exploit correlation --------------------
+
+def test_is_precise():
+    assert software.is_precise("2.4.49")
+    assert software.is_precise("7.4")
+    assert software.is_precise("1.0.1f")
+    assert not software.is_precise("")
+    assert not software.is_precise("Postfix")
+    assert not software.is_precise("5")        # no concrete X.Y version
+
+
+def test_software_exploit_correlation():
+    inv = nmap.parse_xml(s("nmap_tcp.xml"))
+    exploits = searchsploit.entries(s("searchsploit.json"))
+    sw_findings, rows = software.correlate(inv, [], exploits)
+    apache = [r for r in rows
+              if r["product"].lower().startswith("apache") and r["version"] == "2.4.49"]
+    assert apache, "Apache 2.4.49 was not correlated to its public exploit"
+    r = apache[0]
+    assert any(e["edb"] == "50383" for e in r["exploits"])
+    assert "CVE-2021-41773" in r["exploits"][0]["cves"]
+    assert r["severity"] == "critical"   # exploit title contains RCE
+    assert any(f.category == "exploit" and f.version == "2.4.49" and f.assets
+               for f in sw_findings)
+
+
+def test_no_correlation_without_precise_version():
+    # Product detected but no precise version -> never correlated, even if an
+    # exploit title mentions the product ("precise before reporting").
+    inv = nmap.Inventory(services=[nmap.Service(
+        host="h", port=25, proto="tcp", name="smtp", product="Postfix", version="")])
+    exploits = [{"title": "Postfix 2.0 - Something", "edb": "1", "url": "", "cves": []}]
+    _f, rows = software.correlate(inv, [], exploits)
+    assert rows == []
+
+
+def test_report_has_known_exploits_section(tmp_path):
+    inv = nmap.parse_xml(s("nmap_tcp.xml"))
+    exploits = searchsploit.entries(s("searchsploit.json"))
+    sw_findings, rows = software.correlate(inv, [], exploits)
+    ranked = findings.prioritize(nmap.inventory_findings(inv) + sw_findings)
+    cfg = ScanConfig.defaults()
+    cfg.customer_name = "c"
+    state = {"id": "t", "customer": "c", "scan_name": "s", "created_at": 0,
+             "modules": {}, "software_exploits": rows}
+    report.generate(str(tmp_path), cfg, state, inv, ranked, [])
+    html = (tmp_path / "report.html").read_text()
+    assert "Software with known exploits" in html
+    assert "EDB-50383" in html and "2.4.49" in html

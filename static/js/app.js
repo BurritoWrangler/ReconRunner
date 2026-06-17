@@ -99,7 +99,30 @@
     timer = setInterval(tick, 2000);
   }
 
+  // ---- Theme toggle (light/dark) ------------------------------------------
+  function applyThemeIcon(theme) {
+    var b = document.getElementById("theme-toggle");
+    if (!b) return;
+    b.textContent = theme === "light" ? "☾" : "☀";
+    b.title = "Switch to " + (theme === "light" ? "dark" : "light") + " theme";
+  }
+  function initTheme() {
+    var root = document.documentElement;
+    var theme = root.getAttribute("data-theme") || "dark";
+    root.setAttribute("data-theme", theme);
+    applyThemeIcon(theme);
+    var b = document.getElementById("theme-toggle");
+    if (!b) return;
+    b.addEventListener("click", function () {
+      var next = (root.getAttribute("data-theme") === "light") ? "dark" : "light";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem("recon-theme", next); } catch (e) {}
+      applyThemeIcon(next);
+    });
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
+    initTheme();
     initConfig();
     initStatus();
   });

@@ -135,6 +135,34 @@
     <div class="card"><div class="n">{{ total_findings }}</div><div class="l">Total findings</div></div>
   </div>
 
+  {% if software_exploits %}
+  <h2>⚠ Software with known exploits</h2>
+  <p class="small muted">Detected software whose <strong>exact version</strong> matches a public
+  exploit (version confirmed in the exploit title via searchsploit). Validate before use.</p>
+  <table>
+    <thead><tr><th>Asset</th><th>Software</th><th>Version</th><th>Severity</th>
+    <th>Public exploits</th></tr></thead>
+    <tbody>
+    {% for r in software_exploits %}
+      <tr>
+        <td>{{ r.asset or '—' }}</td>
+        <td>{{ r.product }}</td>
+        <td><strong>{{ r.version }}</strong></td>
+        <td><span class="badge sev-{{ r.severity }}">{{ r.severity }}</span></td>
+        <td class="small">
+          {% for e in r.exploits %}
+          <div>{{ e.title }}
+            {% if e.edb %}— <a href="{{ e.url }}">EDB-{{ e.edb }}</a>{% endif %}
+            {% for c in e.cves %}<span class="pill">{{ c }}</span>{% endfor %}
+          </div>
+          {% endfor %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
   <h2>Prioritized findings</h2>
   {% if findings %}
   <table>

@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}recon-runner{% endblock %}</title>
+<script>(function(){try{var t=localStorage.getItem('recon-theme')||'dark';document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
 <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
 </head>
 <body>
@@ -12,6 +13,8 @@
   <nav>
     <a href="{{ url_for('index') }}">Scans</a>
     <a class="btn" href="{{ url_for('new_scan') }}">+ New scan</a>
+    <button id="theme-toggle" class="theme-toggle" type="button"
+            aria-label="Toggle light/dark theme">☀</button>
   </nav>
 </header>
 <main class="container">

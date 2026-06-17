@@ -4,7 +4,8 @@ A self-hosted web app that drives an **external network penetration test** from 
 single, per-scan configurable frontend. Upload a host file (one IP/FQDN per line),
 and the backend runs an NMAP discovery sweep (full TCP + top-1000 UDP), then fans
 out service-appropriate tooling and produces a self-contained HTML report with
-open services, outdated software, and a prioritized findings list.
+open services, software versions with known public exploits, outdated software,
+and a prioritized findings list.
 
 > **Authorized testing only.** Only scan hosts you have explicit, written
 > permission to test. The app requires an authorization acknowledgement before
