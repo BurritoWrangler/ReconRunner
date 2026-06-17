@@ -240,3 +240,13 @@ def test_report_theme_switch(tmp_path):
     light_html = (tmp_path / "light" / "report.html").read_text()
     assert "#f4f6f8" in light_html  # light (printable) background
     assert "#05080a" not in light_html
+
+
+def test_runner_creates_output_dirs(tmp_path):
+    from pentest import runner
+    ws = str(tmp_path)
+    argv = ["nmap", "-Pn", "-oA", f"{ws}/nmap/tcp",
+            f"--xml={ws}/sslscan/h_443.xml", "-iL", f"{ws}/targets.txt"]
+    runner._ensure_output_dirs(argv, ws)
+    assert (tmp_path / "nmap").is_dir()      # nmap -oA parent
+    assert (tmp_path / "sslscan").is_dir()   # sslscan --xml= parent
