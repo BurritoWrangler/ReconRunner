@@ -1,0 +1,8 @@
+[
+  {"arguments": "dnsrecon -d internal.example.com -t std,axfr", "date": "2026-06-18"},
+  {"type": "SOA", "name": "internal.example.com", "address": "ns1.internal.example.com"},
+  {"type": "NS", "name": "internal.example.com", "address": "192.0.2.30"},
+  {"type": "A", "name": "vpn.internal.example.com", "address": "192.0.2.31"},
+  {"type": "A", "name": "mail.internal.example.com", "address": "192.0.2.32"},
+  {"type": "MX", "name": "internal.example.com", "exchange": "mail.internal.example.com"}
+]

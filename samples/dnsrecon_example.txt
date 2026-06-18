@@ -1,0 +1,9 @@
+[*] std: Performing General Enumeration against: internal.example.com...
+[*] Checking for Zone Transfers
+[*] Resolving SOA Record
+[*] 	 SOA ns1.internal.example.com 192.0.2.30
+[*] Trying NS server 192.0.2.30
+[+] Zone Transfer was successful!!
+[*] 	 NS internal.example.com 192.0.2.30
+[*] 	 A vpn.internal.example.com 192.0.2.31
+[*] 	 A mail.internal.example.com 192.0.2.32

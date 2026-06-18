@@ -5,12 +5,13 @@ command builder, config parsing and report rendering.
 """
 
 import os
+import shutil
 
 from pentest import commands, config, findings, report, software
 from pentest.config import ScanConfig
 from pentest.findings import Finding
-from pentest.parsers import (gowitness, generic, httpx, nmap, nuclei,
-                             searchsploit, shcheck, sslscan, sshaudit, whatweb)
+from pentest.parsers import (dnsrecon, gowitness, generic, httpx, nmap, nuclei,
+                             searchsploit, shcheck, smb, sslscan, sshaudit, whatweb)
 
 SAMPLES = os.path.join(os.path.dirname(__file__), "..", "samples")
 
@@ -23,7 +24,7 @@ def s(name):
 
 def test_nmap_inventory_and_web_tls():
     inv = nmap.parse_xml(s("nmap_tcp.xml"))
-    assert len(inv.services) == 5
+    assert len(inv.services) == 7
     ports = {(svc.host, svc.port) for svc in inv.services}
     assert ("web.example.com", 80) in ports
     assert any(svc.is_web() for svc in inv.services)
@@ -301,3 +302,75 @@ def test_report_has_known_exploits_section(tmp_path):
     html = (tmp_path / "report.html").read_text()
     assert "Software with known exploits" in html
     assert "EDB-50383" in html and "2.4.49" in html
+
+
+# ---- SMB + DNS modules ------------------------------------------------------
+
+def test_smb_parsers(tmp_path):
+    d = tmp_path / "smb"
+    d.mkdir()
+    shutil.copyfile(s("enum4linux_example.json"), d / "192.0.2.30_enum4linux.json")
+    shutil.copyfile(s("smbmap_example.txt"), d / "192.0.2.30_smbmap.txt")
+    fs = smb.parse_dir(str(d))
+    titles = {f.title: f for f in fs}
+    assert "SMB shares enumerated" in titles
+    assert "SMB null/guest session permitted" in titles
+    assert titles["SMB null/guest session permitted"].severity == "medium"
+    acc = [f for f in fs if f.title.startswith("SMB shares accessible")]
+    assert acc and acc[0].severity == "high"          # backups is READ, WRITE
+    assert acc[0].assets == ["192.0.2.30:445"]
+
+
+def test_dnsrecon_parser(tmp_path):
+    d = tmp_path / "dnsrecon"
+    d.mkdir()
+    shutil.copyfile(s("dnsrecon_example.json"), d / "192.0.2.30.json")
+    shutil.copyfile(s("dnsrecon_example.txt"), d / "192.0.2.30.txt")
+    fs = dnsrecon.parse_dir(str(d))
+    axfr = [f for f in fs if "zone transfer" in f.title.lower()]
+    assert axfr and axfr[0].severity == "high"
+    assert axfr[0].assets == ["192.0.2.30:53"]
+    assert any(f.title == "DNS records enumerated" for f in fs)
+
+
+def test_smb_dns_command_preview():
+    smb_lines = "\n".join(commands.preview("smb_enum", {}))
+    assert "enum4linux-ng -A <host> -oJ <ws>/smb/<host>_enum4linux" in smb_lines
+    assert "smbmap -H <host> > <ws>/smb/<host>_smbmap.txt" in smb_lines
+    dns_lines = "\n".join(commands.preview("dnsrecon", {}))
+    assert "dnsrecon -d <host> -t std,axfr -j <ws>/dnsrecon/<host>.json" in dns_lines
+
+
+# ---- live stdout streaming (status-page console) ----------------------------
+
+def test_run_spec_streams_stdout(tmp_path):
+    from pentest import runner
+    from pentest.commands import CommandSpec
+    seen = []
+    spec = CommandSpec("probe", ["printf", "alpha\nbeta\n"])
+    res = runner.run_spec(spec, str(tmp_path), timeout=30,
+                          on_output=lambda label, line: seen.append((label, line)))
+    assert res["status"] == "ok" and res["returncode"] == 0
+    text = "".join(line for _, line in seen)
+    assert "alpha" in text and "beta" in text
+    assert all(label == "probe" for label, _ in seen)
+
+
+def test_run_spec_stdout_to_excludes_stderr(tmp_path):
+    from pentest import runner
+    from pentest.commands import CommandSpec
+    out = tmp_path / "o.txt"
+    spec = CommandSpec("mix", ["sh", "-c", "echo OUT; echo ERR 1>&2"],
+                       stdout_to=str(out))
+    runner.run_spec(spec, str(tmp_path), timeout=30)
+    assert "OUT" in out.read_text() and "ERR" not in out.read_text()
+    assert "ERR" in (tmp_path / "logs" / "mix.log").read_text()  # stderr kept in log
+
+
+def test_tail_helper(tmp_path):
+    import app as webapp
+    p = tmp_path / "c.log"
+    p.write_text("\n".join("line%d" % i for i in range(500)) + "\n")
+    tail = webapp._tail(str(p), max_lines=10)
+    assert tail.splitlines()[-1] == "line499"
+    assert len(tail.splitlines()) == 10

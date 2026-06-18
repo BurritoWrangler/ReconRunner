@@ -1,0 +1,7 @@
+[+] IP: 192.0.2.30:445    Name: fileserver.example.com
+        Disk                                                    Permissions     Comment
+        ----                                                    -----------     -------
+        ADMIN$                                                  NO ACCESS       Remote Admin
+        C$                                                      NO ACCESS       Default share
+        IPC$                                                    READ ONLY       Remote IPC
+        backups                                                 READ, WRITE     Nightly backups

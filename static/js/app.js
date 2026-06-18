@@ -75,6 +75,12 @@
     var log = document.getElementById("st-log");
     if (log && data.log) { log.textContent = data.log.join("\n"); log.scrollTop = log.scrollHeight; }
 
+    var con = document.getElementById("st-console");
+    if (con && typeof data.console === "string") {
+      con.textContent = data.console;
+      con.scrollTop = con.scrollHeight;
+    }
+
     if (data.report) {
       var link = document.getElementById("report-link");
       if (link) link.style.display = "";

@@ -55,6 +55,18 @@ def _globals_from(cfg: ScanConfig, targets_text: str) -> dict:
     }
 
 
+def _tail(path: str, max_lines: int = 200, max_bytes: int = 65536) -> str:
+    """Return the last ``max_lines`` lines of a (possibly large) text file."""
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            fh.seek(max(0, fh.tell() - max_bytes))
+            data = fh.read().decode("utf-8", "replace")
+    except OSError:
+        return ""
+    return "\n".join(data.splitlines()[-max_lines:])
+
+
 @app.route("/")
 def index():
     return render_template("index.html", scans=store.list_scans())
@@ -116,6 +128,7 @@ def api_scan_status(scan_id):
     ws, state = store.find_scan(scan_id)
     if not state:
         abort(404)
+    state["console"] = _tail(os.path.join(ws, "logs", "console.log"))
     return jsonify(state)
 
 

@@ -57,7 +57,7 @@ apt_install python3 python3-venv python3-pip git curl wget ca-certificates \
 c_g "Installing scanning tools via apt"
 apt_install nmap sslscan sslyze whatweb nikto testssl.sh wpscan snmp onesixtyone \
             ike-scan swaks smtp-user-enum seclists hydra medusa ncrack exploitdb \
-            dnsutils ssh-audit ffuf feroxbuster amass
+            dnsutils ssh-audit ffuf feroxbuster amass enum4linux-ng smbmap dnsrecon
 
 # --- 3. shcheck.py ----------------------------------------------------------
 if command -v shcheck.py >/dev/null 2>&1; then

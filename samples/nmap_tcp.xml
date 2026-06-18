@@ -34,4 +34,18 @@
       </port>
     </ports>
   </host>
+  <host>
+    <status state="up"/>
+    <address addr="192.0.2.30" addrtype="ipv4"/>
+    <ports>
+      <port protocol="tcp" portid="53">
+        <state state="open"/>
+        <service name="domain" product="ISC BIND" version="9.11.3"/>
+      </port>
+      <port protocol="tcp" portid="445">
+        <state state="open"/>
+        <service name="microsoft-ds" product="Samba smbd" version="4.6.2"/>
+      </port>
+    </ports>
+  </host>
 </nmaprun>

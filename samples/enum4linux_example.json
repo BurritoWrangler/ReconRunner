@@ -1,0 +1,14 @@
+{
+  "target": {"host": "192.0.2.30", "workgroup": "WORKGROUP"},
+  "sessions": {
+    "Null session": "[+] Server allows session using username '', password ''"
+  },
+  "os_info": {"OS": "Windows Server 2016", "Native LAN manager": "Samba 4.6.2"},
+  "shares": {
+    "ADMIN$": {"access": "NO ACCESS", "comment": "Remote Admin"},
+    "C$": {"access": "NO ACCESS", "comment": "Default share"},
+    "IPC$": {"access": "READ", "comment": "Remote IPC"},
+    "backups": {"access": "READ", "comment": "Nightly backups"}
+  },
+  "users": {"1001": {"username": "svc-backup"}, "1002": {"username": "jdoe"}}
+}
