@@ -374,3 +374,144 @@ def test_tail_helper(tmp_path):
     tail = webapp._tail(str(p), max_lines=10)
     assert tail.splitlines()[-1] == "line499"
     assert len(tail.splitlines()) == 10
+
+
+# ---- delete + resume --------------------------------------------------------
+
+def _make_scan(store, customer="acme", status="queued"):
+    """Create a persisted scan workspace and return (scan_id, ws)."""
+    from pentest.store import new_scan_id
+    cfg = ScanConfig.defaults()
+    cfg.customer_name = customer
+    cfg.authorized = True
+    cfg.targets = ["192.0.2.10"]
+    scan_id = new_scan_id()
+    ws = store.create_workspace(cfg, scan_id)
+    state = store.initial_state(cfg, scan_id, ws)
+    state["status"] = status
+    store.save_state(ws, state)
+    return scan_id, ws
+
+
+def test_delete_scan_removes_only_that_workspace(tmp_path):
+    from pentest.store import Store
+    store = Store(base_dir=str(tmp_path))
+    keep_id, keep_ws = _make_scan(store)
+    drop_id, drop_ws = _make_scan(store)            # same customer -> same root
+
+    assert store.delete_scan(drop_id) is True
+    assert not os.path.exists(drop_ws)
+    assert os.path.isdir(keep_ws)                   # sibling untouched
+    assert os.path.isdir(os.path.dirname(drop_ws))  # results_<customer> root kept
+    assert store.find_scan(drop_id) == (None, None)
+    # Unknown id is a no-op, not an error.
+    assert store.delete_scan("nope") is False
+
+
+def test_delete_scan_refuses_path_outside_results(tmp_path, monkeypatch):
+    from pentest.store import Store
+    precious = tmp_path / "precious"
+    precious.mkdir()
+    (precious / "keep.txt").write_text("do not delete")
+    base = tmp_path / "base"
+    base.mkdir()
+    store = Store(base_dir=str(base))
+    # Simulate find_scan resolving to a directory outside the results tree.
+    monkeypatch.setattr(store, "find_scan",
+                        lambda sid: (str(precious), {"id": sid}))
+    assert store.delete_scan("x") is False
+    assert (precious / "keep.txt").exists()
+
+
+def test_mark_interrupted_orphans(tmp_path):
+    from pentest.store import Store
+    store = Store(base_dir=str(tmp_path))
+    run_id, run_ws = _make_scan(store, status="running")
+    q_id, q_ws = _make_scan(store, status="queued")
+    done_id, done_ws = _make_scan(store, customer="beta", status="done")
+
+    assert store.mark_interrupted_orphans() == 2
+    assert store.load_state(run_ws)["status"] == "interrupted"
+    assert store.load_state(q_ws)["status"] == "interrupted"
+    assert "resume" in store.load_state(run_ws)["error"].lower()
+    assert store.load_state(done_ws)["status"] == "done"   # finished scan untouched
+
+
+def test_runner_resume_skips_when_output_present(tmp_path):
+    from pentest import runner
+    from pentest.commands import CommandSpec
+    ws = str(tmp_path)
+    out = tmp_path / "x.json"
+    out.write_text("OLD")
+    spec = CommandSpec("probe", ["printf", "NEW"], stdout_to=str(out))
+
+    res = runner.run_spec(spec, ws, timeout=30, resume=True)
+    assert res["status"] == "skipped"
+    assert out.read_text() == "OLD"            # command did not run
+
+    # Empty output does not count as complete -> the command runs.
+    out.write_text("")
+    res = runner.run_spec(spec, ws, timeout=30, resume=True)
+    assert res["status"] == "ok"
+    assert out.read_text() == "NEW"
+
+    # Without resume the command always runs.
+    out.write_text("OLD")
+    res = runner.run_spec(spec, ws, timeout=30, resume=False)
+    assert res["status"] == "ok" and out.read_text() == "NEW"
+
+
+def test_runner_resume_satisfied_handles_nmap_oa(tmp_path):
+    from pentest import runner
+    from pentest.commands import CommandSpec
+    ws = str(tmp_path)
+    (tmp_path / "targets.txt").write_text("192.0.2.10\n")
+    os.makedirs(tmp_path / "nmap")
+    xml = tmp_path / "nmap" / "tcp.xml"
+    xml.write_text("<nmaprun/>\n")
+    spec = CommandSpec("nmap_tcp",
+                       ["nmap", "-Pn", "-oA", f"{ws}/nmap/tcp",
+                        "-iL", f"{ws}/targets.txt"])
+    assert f"{ws}/nmap/tcp.xml" in runner._resume_outputs(spec, ws)
+    assert runner._resume_satisfied(spec, ws) is True
+    xml.unlink()
+    assert runner._resume_satisfied(spec, ws) is False
+
+
+def test_engine_resume_skips_completed_discovery(tmp_path):
+    from pentest.engine import ScanEngine
+    from pentest.store import Store, new_scan_id
+    store = Store(base_dir=str(tmp_path))
+    engine = ScanEngine(store)
+
+    cfg = ScanConfig.defaults()
+    cfg.customer_name = "acme"
+    cfg.authorized = True
+    cfg.targets = ["192.0.2.10"]
+    cfg.demo = False
+    # Keep it tool-free and deterministic: only nmap_tcp "enabled", and it will
+    # be skipped on resume because we seed its output below.
+    for mid in list(cfg.modules):
+        cfg.modules[mid]["enabled"] = (mid == "nmap_tcp")
+
+    scan_id = new_scan_id()
+    ws = store.create_workspace(cfg, scan_id)
+    state = store.initial_state(cfg, scan_id, ws)
+    state["status"] = "interrupted"
+    store.save_state(ws, state)
+    # Seed a completed nmap_tcp artifact from the committed sample.
+    os.makedirs(os.path.join(ws, "nmap"))
+    shutil.copyfile(s("nmap_tcp.xml"), os.path.join(ws, "nmap", "tcp.xml"))
+
+    assert engine.resume(scan_id) == scan_id
+    engine._queue.join()                 # wait for the background worker
+
+    final = store.load_state(ws)
+    assert final["status"] == "done"
+    assert "resume" not in final         # the one-shot flag was consumed
+    assert "nmap_tcp" not in final["modules"]   # skipped: never executed/recorded
+    assert any("nmap_tcp already complete" in ln for ln in final["log"])
+    assert final["inventory"]["services"]       # inventory built from seeded XML
+    assert os.path.isfile(os.path.join(ws, "report.html"))
+
+    assert engine.resume("unknown-id") is None

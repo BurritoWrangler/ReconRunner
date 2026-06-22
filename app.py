@@ -21,6 +21,10 @@ app.secret_key = os.environ.get("RECON_SECRET", "recon-runner-dev-secret")
 store = Store()
 engine = ScanEngine(store)
 
+# Any scan left "running"/"queued" by a previous process can't still be live;
+# flag them interrupted so the operator can resume from the overview page.
+store.mark_interrupted_orphans()
+
 
 def _build_phases(cfg: ScanConfig) -> list:
     """Config-page data: modules grouped by phase, with values + command preview."""
@@ -121,6 +125,28 @@ def scan_status(scan_id):
     if not state:
         abort(404)
     return render_template("status.html", state=state)
+
+
+@app.route("/scan/<scan_id>/delete", methods=["POST"])
+def scan_delete(scan_id):
+    if store.delete_scan(scan_id):
+        flash("Scan and all its data were deleted.", "success")
+    else:
+        flash("Could not delete that scan (not found or refused).", "error")
+    return redirect(url_for("index"))
+
+
+@app.route("/scan/<scan_id>/resume", methods=["POST"])
+def scan_resume(scan_id):
+    ws, state = store.find_scan(scan_id)
+    if not state:
+        abort(404)
+    if state.get("status") == "done":
+        flash("Scan already completed; nothing to resume.", "warning")
+        return redirect(url_for("scan_status", scan_id=scan_id))
+    engine.resume(scan_id)
+    flash("Resuming scan (completed steps are skipped) …", "success")
+    return redirect(url_for("scan_status", scan_id=scan_id))
 
 
 @app.route("/api/scans/<scan_id>")

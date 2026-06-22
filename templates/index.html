@@ -36,6 +36,15 @@
       <td class="small">
         <a href="{{ url_for('scan_status', scan_id=s.id) }}">status</a>
         {% if s.report %} · <a href="{{ url_for('scan_report', scan_id=s.id) }}">report</a>{% endif %}
+        {% if s.status in ['interrupted', 'error'] %}
+         · <form method="post" action="{{ url_for('scan_resume', scan_id=s.id) }}" style="display:inline">
+            <button class="linkbtn" type="submit">resume</button>
+          </form>
+        {% endif %}
+         · <form method="post" action="{{ url_for('scan_delete', scan_id=s.id) }}" style="display:inline"
+              onsubmit="return confirm('Delete this scan and all of its data? This cannot be undone.');">
+            <button class="linkbtn danger" type="submit">delete</button>
+          </form>
       </td>
     </tr>
   {% endfor %}

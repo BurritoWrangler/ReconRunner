@@ -99,6 +99,103 @@ nuclei -update-templates    # first run downloads templates
 Many tools require **root** for raw scans (nmap `-sS`, UDP). Run accordingly, or
 toggle the "running as root" option off to use nmap `-sT` connect scans.
 
+## Managing scans (delete & resume)
+
+From the **scans overview** page you can:
+
+- **Delete** a scan and all of its data (per-tool artifacts, logs, report). A
+  confirmation is required; deletion only ever removes that scan's own
+  `results_<customer>/<scan-id>/` directory.
+- **Resume** a scan that was interrupted (e.g. the server was restarted mid-run)
+  or that ended in error. Resume is **idempotent**: completed steps are detected
+  by their existing output (discovery artifacts, finished per-service tools) and
+  skipped, so only the unfinished work runs.
+
+On startup the app reconciles state: any scan still marked `running`/`queued`
+from a previous process is flagged `interrupted` so it can be resumed.
+
+## Deployment (production)
+
+`python app.py` starts Flask's **development** server — fine for local use. For a
+persistent install, run the app under a production WSGI server. Two properties of
+the app shape how it must be deployed:
+
+- **Single process, multiple threads.** The scan engine uses an in-process
+  background worker and an in-memory queue, so the app must run as **one worker
+  process**. Use threads for request concurrency — never multiple worker
+  processes, since a second process would have its own queue and never see scans
+  submitted to the first.
+- **No built-in authentication.** The app shells out to real scanning tools and
+  must never be exposed to an untrusted network. Bind it to localhost and/or put
+  it behind an authenticating reverse proxy on a trusted management network.
+
+**1. Install a WSGI server** (into the same virtualenv):
+
+```bash
+source .venv/bin/activate
+pip install gunicorn          # Linux; or `pip install waitress` (cross-platform)
+```
+
+**2. Set a real secret key** (signs Flask session/flash cookies):
+
+```bash
+export RECON_SECRET="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+```
+
+`RECON_HOST` / `RECON_PORT` (default `127.0.0.1:5000`) and `RECON_DEBUG` only
+affect the built-in dev server; under gunicorn/waitress you set the bind address
+on the command line and leave debug off.
+
+**3. Serve it** (single worker, threaded):
+
+```bash
+# gunicorn: --workers 1 is required; --timeout 0 lets long scans run
+# (the engine enforces its own per-module timeout).
+gunicorn --workers 1 --threads 8 --timeout 0 --bind 127.0.0.1:5000 app:app
+
+# waitress is single-process by design, so it satisfies the constraint too:
+waitress-serve --threads=8 --listen=127.0.0.1:5000 app:app
+```
+
+**4. Run it as a service** (systemd, e.g. on Kali):
+
+```ini
+# /etc/systemd/system/recon-runner.service
+[Unit]
+Description=recon-runner
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/recon-runner
+Environment=RECON_SECRET=replace-with-a-random-value
+ExecStart=/opt/recon-runner/.venv/bin/gunicorn --workers 1 --threads 8 --timeout 0 --bind 127.0.0.1:5000 app:app
+Restart=on-failure
+# nmap -sS/UDP need root; if you run as root, keep the bind on localhost.
+User=root
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now recon-runner
+sudo journalctl -u recon-runner -f
+```
+
+Restarting the service is safe: in-flight scans are flagged `interrupted` on the
+next startup and can be resumed from the overview page (see *Managing scans*).
+
+**TLS & access control.** Because the app has no authentication, anything beyond
+localhost should sit behind a reverse proxy (nginx/Caddy) that terminates TLS and
+enforces auth (HTTP basic, mTLS, or SSO), with access restricted to a management
+network.
+
+**Results & retention.** Scan output accumulates under `results_<customer>/`
+(gitignored). Prune or back it up per your retention policy; individual scans can
+be removed from the overview page.
+
 ## Tests
 
 ```bash
@@ -142,8 +239,10 @@ recon-runner/
 │       ├── whatweb.py          # tech + version disclosure (outdated)
 │       ├── gowitness.py        # screenshot entries
 │       ├── searchsploit.py     # public Exploit-DB matches
-│       ├── sshaudit.py         # SSH CVEs / weak algorithms
-│       └── generic.py          # SNMP / IKE / SMTP heuristics
+│       ├── sshaudit.py          # SSH CVEs / weak algorithms
+│       ├── smb.py               # enum4linux-ng + smbmap: shares / null sessions
+│       ├── dnsrecon.py          # DNS records + zone transfer (AXFR)
+│       └── generic.py           # SNMP / IKE / SMTP heuristics
 ├── templates/                  # Jinja2 templates
 │   ├── base.html               # shared layout (top bar, flashes)
 │   ├── index.html              # scan list + demo button
@@ -157,9 +256,10 @@ recon-runner/
 │   ├── nmap_tcp.xml  nmap_udp.xml  httpx.jsonl  nuclei.jsonl
 │   ├── sslscan_example.xml  whatweb_example.json  shcheck_example.json
 │   ├── searchsploit.json  sshaudit_example.json  gowitness.jsonl  snmp_onesixtyone.txt
+│   ├── enum4linux_example.json  smbmap_example.txt  dnsrecon_example.json  dnsrecon_example.txt
 │   └── screens/                # demo screenshots referenced by gowitness.jsonl
 ├── tests/                      # pytest — run anywhere, no scanning tools required
-│   ├── test_recon.py           # parsers, prioritization, report rendering, theme switch
+│   ├── test_recon.py           # parsers, prioritization, report, theme, delete/resume
 │   └── test_cli.py             # CLI: dry-run, list-*, nmap-xml ingestion, theme flag
 ├── docs/                       # theme preview screenshots
 │   ├── config_preview.png  config_preview_dark.png
