@@ -155,6 +155,20 @@ table.grid tbody tr:hover{background:var(--row-hover)}
          cursor:pointer;text-transform:none;letter-spacing:0}
 .linkbtn:hover{text-decoration:underline}
 .linkbtn.danger{color:#d33b5a}
+/* live status: elapsed clock + per-module run detail */
+#st-elapsed{margin-left:auto}
+.mstat{font-weight:700}
+.mstat-ok{color:var(--accent)}
+.mstat-skip{color:var(--muted)}
+.mstat-warn{color:#d33b5a}
+.mstat-missing{color:#b8651a}
+#st-modules .mod-row{cursor:pointer}
+#st-modules .mod-detail>td{padding:0;background:var(--code-bg)}
+table.runs{width:100%;border-collapse:collapse}
+table.runs th,table.runs td{padding:5px 9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+table.runs th{font-size:10px;text-transform:uppercase;color:var(--muted);letter-spacing:.05em}
+table.runs tr:last-child td{border-bottom:none}
+.runcmd{font:12px/1.5 var(--mono);color:var(--term-ink);word-break:break-all}
 .sev-critical{background:var(--crit);color:#fff}
 .sev-high{background:var(--high);color:#1a0d02}
 .sev-medium{background:var(--med);color:#1a1600}

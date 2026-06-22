@@ -515,3 +515,37 @@ def test_engine_resume_skips_completed_discovery(tmp_path):
     assert os.path.isfile(os.path.join(ws, "report.html"))
 
     assert engine.resume("unknown-id") is None
+
+
+# ---- timeouts (only the initial port scans are bounded) ---------------------
+
+def test_run_spec_untimed_runs_to_completion(tmp_path):
+    from pentest import runner
+    from pentest.commands import CommandSpec
+    # timeout=None must not arm a watchdog; the command runs to completion.
+    spec = CommandSpec("slow", ["sh", "-c", "sleep 0.3; echo done"])
+    res = runner.run_spec(spec, str(tmp_path), timeout=None)
+    assert res["status"] == "ok" and res["returncode"] == 0
+
+
+def test_run_spec_timeout_still_kills(tmp_path):
+    from pentest import runner
+    from pentest.commands import CommandSpec
+    # A positive timeout is still honoured (port scans rely on this).
+    spec = CommandSpec("hang", ["sh", "-c", "sleep 3"])
+    res = runner.run_spec(spec, str(tmp_path), timeout=1)
+    assert res["status"] == "timeout"
+
+
+def test_engine_timeout_only_for_port_scans():
+    from pentest.engine import ScanEngine, PORT_SCAN_MODULES
+    eng = ScanEngine()
+    cfg = ScanConfig.defaults()
+    cfg.module_timeout = 900
+    # Only the initial nmap port scans are time-bounded.
+    assert eng._timeout_for(cfg, "nmap_tcp") == 900
+    assert eng._timeout_for(cfg, "nmap_udp") == 900
+    # Everything else (incl. vuln scripts, httpx, nuclei, searchsploit) is untimed.
+    for mid in ("nmap_vuln", "httpx", "nuclei", "searchsploit", "sslscan"):
+        assert eng._timeout_for(cfg, mid) is None
+    assert PORT_SCAN_MODULES == {"nmap_tcp", "nmap_udp"}

@@ -6,6 +6,7 @@ Run with:  python app.py   (serves http://127.0.0.1:5000)
 from __future__ import annotations
 
 import os
+import time
 
 from flask import (Flask, abort, flash, jsonify, redirect, render_template,
                    request, send_file, url_for)
@@ -155,6 +156,11 @@ def api_scan_status(scan_id):
     if not state:
         abort(404)
     state["console"] = _tail(os.path.join(ws, "logs", "console.log"))
+    # Derived, non-persistent fields for the live UI (wall-clock elapsed).
+    started = state.get("started_at")
+    if started:
+        end = state.get("ended_at") or time.time()
+        state["elapsed_seconds"] = max(0, int(end - started))
     return jsonify(state)
 
 

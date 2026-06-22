@@ -48,29 +48,118 @@
     });
   }
 
+  var PHASE_LABELS = {
+    queued: "Queued", import: "Importing nmap XML",
+    discovery: "Discovery — dnsx + nmap", phase2: "Service modules",
+    correlate: "Correlating findings", report: "Building report",
+    done: "Complete", interrupted: "Interrupted"
+  };
+
+  function fmtDur(sec) {
+    sec = Math.max(0, Math.round(sec || 0));
+    if (sec < 60) return sec + "s";
+    var m = Math.floor(sec / 60), s = sec % 60;
+    if (m < 60) return m + "m " + (s < 10 ? "0" : "") + s + "s";
+    var h = Math.floor(m / 60), mm = m % 60;
+    return h + "h " + (mm < 10 ? "0" : "") + mm + "m";
+  }
+
+  function modStatusClass(s) {
+    s = String(s || "");
+    if (s.indexOf("error") >= 0 || s.indexOf("timeout") >= 0) return "mstat-warn";
+    if (s.indexOf("missing") >= 0 || s.indexOf("not found") >= 0) return "mstat-missing";
+    if (s.indexOf("skip") >= 0) return "mstat-skip";
+    return "mstat-ok";
+  }
+
+  function runCounts(runs) {
+    var c = {}, order = [];
+    (runs || []).forEach(function (r) {
+      var k = r.status || "?";
+      if (c[k] === undefined) { c[k] = 0; order.push(k); }
+      c[k]++;
+    });
+    return order.map(function (k) { return c[k] + " " + k; }).join(" · ");
+  }
+
+  function renderModules(data) {
+    var modules = data.modules || {};
+    var mids = Object.keys(modules).sort();
+    var expanded = window.__reconExpanded || (window.__reconExpanded = {});
+    var tbody = document.querySelector("#st-modules tbody");
+    if (tbody) {
+      var rows = "";
+      mids.forEach(function (mid) {
+        var m = modules[mid];
+        var runs = m.runs || [];
+        var dur = runs.reduce(function (a, r) { return a + (r.duration || 0); }, 0);
+        var open = !!expanded[mid];
+        var caret = runs.length ? (open ? "▾ " : "▸ ") : "&nbsp;&nbsp;";
+        rows += "<tr class='mod-row' data-mid='" + esc(mid) + "'>" +
+          "<td>" + caret + esc(mid) + "</td>" +
+          "<td><span class='mstat " + modStatusClass(m.status) + "'>" + esc(m.status) + "</span></td>" +
+          "<td class='small'>" + esc(runCounts(runs) || String(runs.length)) + "</td>" +
+          "<td class='small'>" + (dur ? fmtDur(dur) : "—") + "</td></tr>";
+        if (open && runs.length) {
+          var inner = "";
+          runs.forEach(function (r) {
+            inner += "<tr><td class='small'>" + esc(r.label) + "</td>" +
+              "<td class='small'><span class='mstat " + modStatusClass(r.status) + "'>" + esc(r.status) + "</span></td>" +
+              "<td class='small'>" + (r.duration ? fmtDur(r.duration) : "—") + "</td>" +
+              "<td class='runcmd'>" + esc(r.command || "") + "</td></tr>";
+          });
+          rows += "<tr class='mod-detail'><td colspan='4'><table class='runs'>" +
+            "<thead><tr><th>Run</th><th>Status</th><th>Time</th><th>Command</th></tr></thead>" +
+            "<tbody>" + inner + "</tbody></table></td></tr>";
+        }
+      });
+      tbody.innerHTML = rows;
+      tbody.querySelectorAll(".mod-row").forEach(function (tr) {
+        tr.addEventListener("click", function () {
+          var mid = tr.getAttribute("data-mid");
+          expanded[mid] = !expanded[mid];
+          renderModules(window.__reconLast || data);
+        });
+      });
+    }
+    var ms = document.getElementById("st-modsum");
+    if (ms) {
+      if (mids.length) {
+        var sum = { ok: 0, skipped: 0, errors: 0, missing: 0 };
+        mids.forEach(function (mid) {
+          var st = String(modules[mid].status || "");
+          if (st.indexOf("error") >= 0 || st.indexOf("timeout") >= 0) sum.errors++;
+          else if (st.indexOf("missing") >= 0 || st.indexOf("not found") >= 0) sum.missing++;
+          else if (st.indexOf("skip") >= 0) sum.skipped++;
+          else sum.ok++;
+        });
+        ms.textContent = mids.length + " modules — " + sum.ok + " ok · " +
+          sum.skipped + " skipped · " + sum.errors + " with errors · " + sum.missing + " tool-missing";
+      } else {
+        ms.textContent = "";
+      }
+    }
+  }
+
   function renderStatus(data) {
+    window.__reconLast = data;
     var stt = document.getElementById("st-status");
     if (stt) { stt.textContent = data.status; stt.className = "status status-" + data.status; }
     var ph = document.getElementById("st-phase");
-    if (ph) ph.textContent = data.phase || "";
+    if (ph) ph.textContent = PHASE_LABELS[data.phase] || data.phase || "";
+    var el = document.getElementById("st-elapsed");
+    if (el && typeof data.elapsed_seconds === "number") {
+      el.textContent = (data.status === "done" ? "took " : "elapsed ") + fmtDur(data.elapsed_seconds);
+    }
 
     var prog = data.progress || { total: 0, completed: 0 };
     var pct = prog.total ? Math.round((prog.completed / prog.total) * 100) : (data.status === "done" ? 100 : 0);
     var bar = document.getElementById("st-bar");
     if (bar) bar.style.width = pct + "%";
     var pl = document.getElementById("st-progress");
-    if (pl) pl.textContent = prog.total ? (prog.completed + " / " + prog.total + " module tasks") : "";
+    if (pl) pl.textContent = prog.total ? ("Phase 2: " + prog.completed + " / " + prog.total + " module tasks (" + pct + "%)") : "";
 
-    var tbody = document.querySelector("#st-modules tbody");
-    if (tbody && data.modules) {
-      var rows = "";
-      Object.keys(data.modules).forEach(function (mid) {
-        var m = data.modules[mid];
-        rows += "<tr><td>" + esc(mid) + "</td><td>" + esc(m.status) +
-          "</td><td class='small'>" + ((m.runs || []).length) + "</td></tr>";
-      });
-      tbody.innerHTML = rows;
-    }
+    renderModules(data);
 
     var log = document.getElementById("st-log");
     if (log && data.log) { log.textContent = data.log.join("\n"); log.scrollTop = log.scrollHeight; }

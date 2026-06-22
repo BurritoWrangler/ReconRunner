@@ -19,9 +19,11 @@
     <span class="status status-{{ state.status }}" id="st-status">{{ state.status }}</span>
     <span class="muted" id="st-phase">{{ state.phase }}</span>
     {% if state.demo %}<span class="tag">demo</span>{% endif %}
+    <span class="small muted" id="st-elapsed"></span>
   </div>
   <div class="progress"><div class="bar" id="st-bar" style="width:0%"></div></div>
   <div class="small muted" id="st-progress"></div>
+  <div class="small muted" id="st-modsum"></div>
   {% if state.error %}<div class="flash flash-error" id="st-error">{{ state.error }}</div>{% endif %}
 
   <h3>Scope ({{ state.targets|length }})</h3>
@@ -29,9 +31,10 @@
 
   <h3>Modules</h3>
   <table class="grid" id="st-modules">
-    <thead><tr><th>Module</th><th>Status</th><th>Runs</th></tr></thead>
+    <thead><tr><th>Module</th><th>Status</th><th>Tasks</th><th>Time</th></tr></thead>
     <tbody></tbody>
   </table>
+  <p class="small muted">Click a module row to expand its individual commands.</p>
 
   <h3>Activity log</h3>
   <pre class="log" id="st-log"></pre>
