@@ -549,3 +549,95 @@ def test_engine_timeout_only_for_port_scans():
     for mid in ("nmap_vuln", "httpx", "nuclei", "searchsploit", "sslscan"):
         assert eng._timeout_for(cfg, mid) is None
     assert PORT_SCAN_MODULES == {"nmap_tcp", "nmap_udp"}
+
+
+def test_nmap_vuln_runs_async_and_bounded(tmp_path, monkeypatch):
+    """nmap_vuln must run off the main thread (so it can't block the pipeline)
+    AND be bounded by the configured timeout (so it can't hang forever)."""
+    import threading
+    from pentest import engine as eng_mod
+    from pentest.engine import ScanEngine
+    from pentest.store import Store
+
+    calls = []
+
+    def fake_run_specs(specs, ws, timeout=None, on_output=None, resume=False):
+        labels = [sp.label for sp in specs]
+        calls.append({"labels": labels, "timeout": timeout,
+                      "thread": threading.current_thread().name})
+        return [{"label": lb, "command": "x", "status": "ok",
+                 "duration": 0.1, "error": "", "log": ""} for lb in labels]
+
+    # Run without real tools: stub execution and force availability.
+    monkeypatch.setattr(eng_mod, "run_specs", fake_run_specs)
+    monkeypatch.setattr(eng_mod.tools.Module, "available", lambda self: True)
+
+    store = Store(base_dir=str(tmp_path))
+    engine = ScanEngine(store)
+    cfg = ScanConfig.defaults()
+    cfg.customer_name = "acme"
+    cfg.authorized = True
+    cfg.targets = ["192.0.2.10"]
+    cfg.module_timeout = 600
+    for mid in list(cfg.modules):
+        cfg.modules[mid]["enabled"] = mid in ("nmap_tcp", "nmap_vuln")
+
+    ws, state = engine.run_sync(cfg)
+
+    assert state["status"] == "done"
+    assert "nmap_vuln" in state["modules"]          # joined + recorded
+
+    vuln_calls = [c for c in calls if "nmap_vuln" in c["labels"]]
+    tcp_calls = [c for c in calls if "nmap_tcp" in c["labels"]]
+    assert vuln_calls and tcp_calls
+    # Bounded by the configured timeout (the regression left it untimed/None).
+    assert all(c["timeout"] == 600 for c in vuln_calls)
+    # Ran asynchronously on the background executor thread, while the port scan
+    # stayed inline on the calling thread.
+    assert all(c["thread"].startswith("nmap-vuln") for c in vuln_calls)
+    assert not any(c["thread"].startswith("nmap-vuln") for c in tcp_calls)
+
+
+def test_run_spec_timeout_is_graceful(tmp_path):
+    """On timeout the tool gets SIGTERM first (so it can flush partial output),
+    not an immediate SIGKILL."""
+    from pentest import runner
+    from pentest.commands import CommandSpec
+    marker = tmp_path / "flushed.txt"
+    # Trap SIGTERM, write a marker, then exit; `sleep & wait` makes the trap fire
+    # promptly when the signal arrives.
+    script = f"trap 'echo flushed > {marker}; exit 0' TERM; sleep 5 & wait"
+    spec = CommandSpec("graceful", ["sh", "-c", script])
+    res = runner.run_spec(spec, str(tmp_path), timeout=1)
+    assert res["status"] == "timeout"
+    assert marker.exists()   # SIGTERM let it flush before any force-kill
+
+
+def test_nmap_parse_recovers_truncated(tmp_path):
+    """A killed/timed-out nmap leaves an unclosed XML; completed <host> blocks
+    must still be recovered so findings aren't lost."""
+    from pentest.parsers import nmap
+    full = open(s("nmap_tcp.xml")).read()
+    cut = full.index("</host>") + len("</host>")   # keep one complete host, drop the close tag
+    truncated = tmp_path / "tcp.xml"
+    truncated.write_text(full[:cut])
+    inv = nmap.parse_xml(str(truncated))
+    assert inv.services                 # recovered, not parsed-as-empty
+    assert len(inv.hosts()) == 1
+
+
+def test_report_lists_nuclei_cves(tmp_path):
+    from pentest import report
+    from pentest.parsers import nmap, nuclei
+    inv = nmap.parse_xml(s("nmap_tcp.xml"))
+    ranked = findings.prioritize(nuclei.parse(s("nuclei.jsonl")))
+    cfg = ScanConfig.defaults()
+    cfg.customer_name = "c"
+    state = {"id": "t", "customer": "c", "scan_name": "s", "created_at": 0,
+             "modules": {}}
+    ctx = report.build_context(str(tmp_path), cfg, state, inv, ranked, [])
+    assert "CVE-2021-41773" in [r["cve"] for r in ctx["cves"]]
+    assert any("nuclei" in r["sources"] for r in ctx["cves"])
+    report.generate(str(tmp_path), cfg, state, inv, ranked, [])
+    html = (tmp_path / "report.html").read_text()
+    assert "Known CVEs" in html and "CVE-2021-41773" in html

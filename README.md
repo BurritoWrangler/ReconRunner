@@ -150,7 +150,7 @@ on the command line and leave debug off.
 
 ```bash
 # gunicorn: --workers 1 is required; --timeout 0 lets long scans run
-# (only the initial nmap port scan is time-bounded; other tools run untimed).
+# (the nmap port + vuln scans are time-bounded; other tools run untimed).
 gunicorn --workers 1 --threads 8 --timeout 0 --bind 127.0.0.1:5000 app:app
 
 # waitress is single-process by design, so it satisfies the constraint too:

@@ -163,6 +163,25 @@
   </table>
   {% endif %}
 
+  {% if cves %}
+  <h2>Known CVEs</h2>
+  <p class="small muted">Every CVE identifier surfaced by the scan — nuclei templates,
+  nmap vulners NSE, and version correlation. Confirm exploitability against vendor advisories.</p>
+  <table>
+    <thead><tr><th>CVE</th><th>Severity</th><th>Affected</th><th>Detected by</th></tr></thead>
+    <tbody>
+    {% for c in cves %}
+      <tr>
+        <td><a class="refs" href="{{ c.url }}">{{ c.cve }}</a></td>
+        <td><span class="badge sev-{{ c.severity }}">{{ c.severity }}</span></td>
+        <td class="small">{% for a in c.assets %}<div>{{ a }}</div>{% else %}—{% endfor %}</td>
+        <td class="small">{{ c.sources|join(', ') }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
   <h2>Prioritized findings</h2>
   {% if findings %}
   <table>
