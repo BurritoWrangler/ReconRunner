@@ -29,26 +29,43 @@ subdomain enumeration and passive URL recon, which are **off by default**.
 All per-tool output is written under `results_<CUSTOMERNAME>/<scan-id>/`, including
 a `logs/` directory that captures every module's stdout+stderr.
 
-## Quick start (development, macOS or Linux)
+## Quick start (macOS or Linux)
+
+One command bootstraps a Python virtualenv (first run only) and launches the
+web UI:
 
 ```bash
-cd recon-runner
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-python app.py            # serves http://127.0.0.1:5000
+./run.sh            # -> http://127.0.0.1:5000  (creates .venv first run)
 ```
 
-On **Kali Linux** (the intended runtime), run the setup script to install
-*everything* in one shot — system packages, the full scanning toolset (apt + Go
-tools), `shcheck.py`, nuclei templates, and the Python virtualenv:
+`run.sh` subcommands cover everything you need without manual venv activation:
 
 ```bash
-./setup.sh            # Kali Linux; uses sudo for system + tool installs
+./run.sh demo          # render a sample report from bundled data (no scanning tools)
+./run.sh test          # run the pytest suite
+./run.sh cli -- --list-tools     # see which scanning tools are installed
+./run.sh setup         # Kali Linux: install the full scanning toolset (runs setup.sh)
+./run.sh --help
 ```
+
+Run as root (`sudo ./run.sh`) only if you want nmap `-sS`/UDP raw scans; without
+root the UI uses nmap `-sT` connect scans. Set `RECON_HOST`/`RECON_PORT`/
+`RECON_DEBUG` env vars to override the bind.
+
+On **Kali Linux** (the intended runtime for real scans), run the setup script to
+install *everything* in one shot — system packages, the full scanning toolset
+(apt + Go tools), `shcheck.py`, nuclei templates, and the Python virtualenv:
+
+```bash
+./run.sh setup       # Kali Linux; uses sudo for system + tool installs
+```
+
+(That's `setup.sh` under the hood; see its header for details.)
 
 On macOS (or any box without the scanning tools installed) the UI and report can
-still be exercised via **Demo mode** (button on the home page), which renders a
-full report from the bundled sample tool outputs in `samples/`.
+still be exercised via **Demo mode**: `./run.sh demo` (or the Demo button on the
+home page) renders a full report from the bundled sample tool outputs in
+`samples/`.
 
 ## CLI (v1.1)
 
@@ -205,8 +222,7 @@ be removed from the overview page.
 ## Tests
 
 ```bash
-pip install pytest
-pytest -q
+./run.sh test      # bootstraps the venv if needed, runs pytest
 ```
 
 Tests run anywhere (no scanning tools required) — they exercise the parsers
@@ -218,6 +234,8 @@ against the committed sample outputs in `samples/`.
 recon-runner/
 ├── app.py                      # Flask web app (routes; background-queue scans)
 ├── recon_cli.py                # v1.1 CLI entry point (alternative to the web app)
+├── run.sh                      # one-command install & run (bootstraps .venv + launches)
+├── setup.sh                    # Kali: install all scanning tools + Python deps
 ├── requirements.txt            # Flask + Jinja2 (the CLI needs only Jinja2)
 ├── README.md
 ├── .gitignore                  # ignores results_*/, venvs, caches

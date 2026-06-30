@@ -113,11 +113,10 @@ if command -v nuclei >/dev/null 2>&1; then
 fi
 
 # --- 6. Python virtualenv + app deps ----------------------------------------
+# Delegated to ./run.sh so there is one source of truth for the venv bootstrap.
 c_g "Creating Python virtualenv (.venv) + installing Flask/Jinja2/pytest"
-if python3 -m venv .venv \
-   && .venv/bin/python -m pip install --quiet --upgrade pip \
-   && .venv/bin/python -m pip install --quiet -r requirements.txt pytest; then
-  c_g "Python environment ready (.venv)"
+if ./run.sh install >/dev/null 2>&1; then
+  .venv/bin/python -m pip install --quiet pytest && c_g "Python environment ready (.venv)"
 else
   c_r "Python virtualenv setup failed"
 fi
@@ -130,9 +129,8 @@ c_g "Tool availability:"
 cat <<'EOF'
 
 Setup complete. Next steps:
-  source .venv/bin/activate
-  sudo .venv/bin/python app.py        # web UI (root needed for -sS / UDP) -> http://127.0.0.1:5000
-  # or the CLI:
-  sudo .venv/bin/python recon_cli.py --customer acme --hosts scope.txt --authorize
-  pytest -q                           # run the test suite
+  ./run.sh                 # web UI  -> http://127.0.0.1:5000  (root for -sS/UDP)
+  ./run.sh demo            # render a sample report (no tools needed)
+  ./run.sh test            # run the pytest suite
+  ./run.sh cli -- --list-tools   # see which scanning tools were found
 EOF
