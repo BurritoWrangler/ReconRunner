@@ -10,8 +10,10 @@ import shutil
 from pentest import commands, config, findings, report, software
 from pentest.config import ScanConfig
 from pentest.findings import Finding
-from pentest.parsers import (dnsrecon, gowitness, generic, httpx, nmap, nuclei,
-                             searchsploit, shcheck, smb, sslscan, sshaudit, whatweb)
+from pentest.parsers import (bruteforce, content, dnsrecon, dnsx, gowitness,
+                             generic, httpx, nmap, nikto, nuclei, recon,
+                             searchsploit, shcheck, smb, sslscan, sshaudit,
+                             testssl, whatweb, wpscan)
 
 SAMPLES = os.path.join(os.path.dirname(__file__), "..", "samples")
 
@@ -164,8 +166,28 @@ def test_preview_stdout_redirect_for_shcheck():
 def test_preview_nuclei_outputs():
     line = commands.preview("nuclei", {"severities": "high,critical",
                                        "rate_limit": 100})[0]
-    assert "-jsonl-export <ws>/nuclei.jsonl" in line
-    assert "-o <ws>/nuclei.txt" in line
+    assert "-jsonl " in line                 # JSONL emitted to stdout
+    assert "> <ws>/nuclei.jsonl" in line      # runner captures stdout -> nuclei.jsonl
+    assert "-severity high,critical" in line
+    assert "-rate-limit 100" in line
+
+
+def test_nuclei_stdout_captured_to_jsonl(tmp_path):
+    """nuclei emits JSONL to stdout; the runner must capture it to nuclei.jsonl
+    (which the parser reads). Stats/progress go to stderr and must NOT pollute it."""
+    from pentest import commands, runner
+    from pentest.commands import Ctx
+    c = Ctx(ws=str(tmp_path),
+            web_urls_file=str(tmp_path / "web_urls.txt"))
+    (tmp_path / "web_urls.txt").write_text("http://x\n")
+    spec = commands.build_commands("nuclei", {"severities": "high,critical"}, c)[0]
+    # `printf` emits a nuclei-style JSONL line to stdout; `echo STATS` to stderr.
+    spec = commands.CommandSpec(
+        spec.label, ["sh", "-c", "printf '%s\n' '{\"template-id\":\"CVE-1\",\"info\":{\"name\":\"x\",\"severity\":\"high\"}}'; echo STATS 1>&2"],
+        stdout_to=spec.stdout_to)
+    runner.run_spec(spec, str(tmp_path), timeout=30)
+    out = (tmp_path / "nuclei.jsonl").read_text()
+    assert "CVE-1" in out and "STATS" not in out   # clean JSONL, no stats
 
 
 # ---- config -----------------------------------------------------------------
@@ -339,6 +361,154 @@ def test_smb_dns_command_preview():
     assert "smbmap -H <host> > <ws>/smb/<host>_smbmap.txt" in smb_lines
     dns_lines = "\n".join(commands.preview("dnsrecon", {}))
     assert "dnsrecon -d <host> -t std,axfr -j <ws>/dnsrecon/<host>.json" in dns_lines
+
+
+# ---- previously-dropped tools now gathered into the report -------------------
+
+def _wjson(path, obj):
+    import json as _j
+    os.makedirs(os.path.dirname(str(path)), exist_ok=True)
+    with open(str(path), "w") as fh:
+        fh.write(_j.dumps(obj))
+
+
+def _wjsonl(path, rows):
+    import json as _j
+    os.makedirs(os.path.dirname(str(path)), exist_ok=True)
+    with open(str(path), "w") as fh:
+        for r in rows:
+            fh.write(_j.dumps(r) + "\n")
+
+
+def test_nikto_parser(tmp_path):
+    d = tmp_path / "nikto"
+    _wjson(d / "192.0.2.10_80.json", [
+        {"msg": "Server may leak version via header", "item": "X-Powered-By", "url": "/"},
+        {"msg": "OSVDB-3092: /admin SQL injection CVE-2020-1234", "item": "/admin", "osvdb": "3092", "url": "/admin"},
+    ])
+    fs = nikto.parse_dir(str(d))
+    assert len(fs) == 2
+    assert any(f.category == "cve" and "CVE-2020-1234" in f.references for f in fs)
+    assert any(f.category == "exposure" and f.severity == "low" for f in fs)  # header keyword
+
+
+def test_testssl_parser(tmp_path):
+    d = tmp_path / "testssl"
+    _wjsonl(d / "192.0.2.10_443.json", [
+        {"severity": "CRITICAL", "id": "heartbleed", "finding": "Vulnerable to Heartbleed", "cve": "CVE-2014-0160"},
+        {"severity": "OK", "id": "protocols", "finding": "TLS 1.2 offered"},  # dropped (OK, no cve)
+        {"severity": "MEDIUM", "id": "cbc", "finding": "CBC ciphers offered"},
+    ])
+    fs = testssl.parse_dir(str(d))
+    assert any(f.severity == "critical" and "CVE-2014-0160" in f.references for f in fs)
+    assert any(f.severity == "medium" for f in fs)
+    assert not any("TLS 1.2 offered" in f.title for f in fs)   # OK record dropped
+
+
+def test_wpscan_parser(tmp_path):
+    d = tmp_path / "wpscan"
+    _wjson(d / "192.0.2.10_80.json", {
+        "interesting_findings": [{"to_s": "WordPress version 5.0 identified", "url": "http://x"}],
+        "version": {"number": "5.0", "vulnerabilities": [
+            {"title": "WP 5.0 XSS", "references": {"cve": ["CVE-2018-1234"]}, "fixed_in": "5.0.1"}]},
+        "plugins": {"contact-form-7": {"version": "5.1", "vulnerabilities": []}},
+    })
+    fs = wpscan.parse_dir(str(d))
+    assert any(f.category == "outdated" and f.product == "WordPress" and f.version == "5.0" for f in fs)
+    assert any(f.category == "cve" and "CVE-2018-1234" in f.references for f in fs)
+    assert any(f.category == "exposure" for f in fs)   # interesting_finding
+
+
+def test_content_parser_ffuf_and_feroxbuster(tmp_path):
+    _wjson(tmp_path / "ffuf" / "192.0.2.10_80.json",
+           {"results": [{"input": {"FUZZ": "/admin"}, "status": 200, "length": 1234},
+                         {"input": {"FUZZ": "/secret"}, "status": 403, "length": 90}]})
+    _wjsonl(tmp_path / "ferox" / "192.0.2.20_80.json",
+            [{"type": "response", "url": "http://192.0.2.20/login", "status": 401},
+             {"type": "response", "url": "http://192.0.2.20/api", "status": 404}])
+    fs = content.parse_dir(str(tmp_path))
+    assert len(fs) == 3   # ffuf 2 + feroxbuster 1 (404 skipped)
+    assert any("/admin" in f.title and f.severity == "low" for f in fs)
+    assert any("/secret" in f.title and f.severity == "medium" for f in fs)  # 403 auth-gated
+    assert any("/login" in f.title and f.severity == "medium" for f in fs)  # 401
+
+
+def test_recon_parser_katana_gau_subfinder(tmp_path):
+    _wjsonl(tmp_path / "katana.jsonl", [{"endpoint": "https://x.com/a"}, {"endpoint": "https://x.com/b"}])
+    _wjsonl(tmp_path / "subfinder" / "example.com.jsonl", [{"host": "a.example.com"}, {"host": "b.example.com"}])
+    gau = tmp_path / "gau"
+    gau.mkdir()
+    (gau / "example.com.txt").write_text("https://x.com/old\nhttps://x.com/older\n")
+    (gau / "example.com_wayback.txt").write_text("https://x.com/wb1\n")
+    fs = recon.parse_dir(str(tmp_path))
+    assert any(f.source_tools == ["katana"] and "2 endpoint" in f.title for f in fs)
+    assert any(f.source_tools == ["gau"] and "2 historical" in f.title for f in fs)
+    assert any(f.source_tools == ["waybackurls"] for f in fs)
+    assert any(f.source_tools == ["subfinder"] and "2 subdomain" in f.title for f in fs)
+
+
+def test_recon_parser_amass(tmp_path):
+    _wjsonl(tmp_path / "amass" / "example.com.json",
+            [{"name": "a.example.com"}, {"name": "b.example.com"}])
+    fs = recon.parse_dir(str(tmp_path))
+    assert any(f.source_tools == ["amass"] and "2 subdomain" in f.title for f in fs)
+
+
+def test_bruteforce_parser_hydra_medusa_ncrack(tmp_path):
+    d = tmp_path / "bruteforce"
+    _wjson(d / "192.0.2.10_ssh.json",
+           {"results": [{"host": "192.0.2.10", "login": "root", "password": "toor", "service": "ssh", "port": 22}]})
+    (d / "192.0.2.20_ssh.log").write_text(
+        "ACCOUNT FOUND: [ssh] Host: 192.0.2.20 User: admin Password: admin123\n")
+    (d / "192.0.2.30_ftp.txt").write_text(
+        "Discovered credentials for ftp on 192.0.2.30:21:\n  user:pass  success\n")
+    fs = bruteforce.parse_dir(str(d))
+    assert len(fs) == 3
+    assert all(f.severity == "critical" and f.category == "exploit" for f in fs)
+    assert any(f.source_tools == ["hydra"] and "root@192.0.2.10" in f.title for f in fs)
+    assert any(f.source_tools == ["medusa"] and "admin@192.0.2.20" in f.title for f in fs)
+    assert any(f.source_tools == ["ncrack"] and "user@192.0.2.30" in f.title for f in fs)
+
+
+def test_dnsx_findings(tmp_path):
+    _wjsonl(tmp_path / "dnsx.jsonl",
+            [{"host": "mail.example.com", "a": ["192.0.2.10"], "cname": ["web.example.com"]}])
+    fs = dnsx.findings(str(tmp_path / "dnsx.jsonl"))
+    assert fs and fs[0].category == "recon" and fs[0].source_tools == ["dnsx"]
+    assert "192.0.2.10" in fs[0].evidence and "CNAME" in fs[0].evidence
+
+
+def test_engine_gathers_all_tools(tmp_path, monkeypatch):
+    """_gather must parse every tool's artifacts, not just the original 12."""
+    from pentest.engine import ScanEngine
+    from pentest.store import Store, new_scan_id
+    monkeypatch.setattr("pentest.engine.tools.Module.available", lambda self: True)
+    store = Store(base_dir=str(tmp_path))
+    eng = ScanEngine(store)
+    cfg = ScanConfig.defaults()
+    cfg.customer_name = "acme"
+    cfg.authorized = True
+    cfg.targets = ["192.0.2.10"]
+    # Enable every module so each produces an artifact.
+    for mid in list(cfg.modules):
+        cfg.modules[mid]["enabled"] = True
+    cfg.modules["bruteforce"]["options"]["confirm"] = True
+    sid = new_scan_id()
+    ws = store.create_workspace(cfg, sid)
+    # Seed a minimal artifact per tool so the (no-tool) parsers have something.
+    _wjson(os.path.join(ws, "nikto", "h_80.json"), [{"msg": "x", "item": "y"}])
+    _wjsonl(os.path.join(ws, "testssl", "h_443.json"), [{"severity": "HIGH", "finding": "x"}])
+    _wjson(os.path.join(ws, "wpscan", "h_80.json"), {"version": {"number": "5.0"}})
+    _wjson(os.path.join(ws, "ffuf", "h_80.json"),
+           {"results": [{"input": {"FUZZ": "/a"}, "status": 200}]})
+    _wjsonl(os.path.join(ws, "katana.jsonl"), [{"endpoint": "https://x/a"}])
+    _wjson(os.path.join(ws, "bruteforce", "h_ssh.json"),
+           {"results": [{"host": "h", "login": "r", "password": "p", "service": "ssh"}]})
+    _wjsonl(os.path.join(ws, "dnsx.jsonl"), [{"host": "h", "a": ["1.2.3.4"]}])
+    inv, found, _ = eng._gather(ws)
+    tools_seen = {t for f in found for t in f.source_tools}
+    for tool in ("nikto", "testssl", "wpscan", "ffuf", "katana", "dnsx"):
+        assert tool in tools_seen, f"{tool} output not gathered into report"
 
 
 # ---- live stdout streaming (status-page console) ----------------------------

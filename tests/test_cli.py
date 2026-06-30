@@ -26,7 +26,8 @@ def test_dry_run_nmap_xml(capsys):
     assert rc == 0
     out = capsys.readouterr().out
     assert "discovery skipped" in out
-    assert "nuclei -l" in out and "-jsonl-export" in out
+    assert "nuclei -l" in out and "-jsonl" in out
+    assert "> " in out and "nuclei.jsonl" in out   # captured via stdout_to
 
 
 def test_missing_input_errors(capsys):
