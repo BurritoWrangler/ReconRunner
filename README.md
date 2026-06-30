@@ -15,7 +15,8 @@ and a prioritized findings list.
 
 ```
 Config page ─▶ Phase 0: dnsx (resolve/validate)
-            ─▶ Phase 1: nmap full TCP + top-1000 UDP (+ vulners NSE)
+            ─▶ Phase 1: nmap full TCP + top-1000 UDP (+ vulners + high-impact NSE:
+              EternalBlue/BlueKeep/Cisco Smart Install/ftp-anon)
             ─▶ Phase 2: service-driven modules (gated by what nmap found open)
             ─▶ Phase 3: correlate + prioritize + outdated-software
             ─▶ Phase 4: self-contained HTML report
@@ -94,6 +95,11 @@ sudo apt update && sudo apt install -y \
 
 # shcheck.py and ssh-audit are available via apt/pip depending on your Kali release.
 nuclei -update-templates    # first run downloads templates
+
+# Optional: the Smart Install check uses the third-party cisco-siet NSE script
+# (not shipped with nmap). Drop cisco-siet.nse into your nmap scripts dir and
+# run `nmap --script-updatedb` to enable it; otherwise nmap skips it with a
+# warning and the check is a no-op. EternalBlue/BlueKeep/ftp-anon ship with nmap.
 ```
 
 Many tools require **root** for raw scans (nmap `-sS`, UDP). Run accordingly, or
@@ -229,7 +235,7 @@ recon-runner/
 │   └── parsers/                # tolerant tool-output parsers -> Findings / inventory
 │       ├── __init__.py
 │       ├── util.py             # shared JSON/JSONL readers
-│       ├── nmap.py             # nmap XML -> Service inventory + vulners CVEs
+│       ├── nmap.py             # nmap XML -> Service inventory + vulners CVEs + curated NSE findings
 │       ├── httpx.py            # live web services + tech
 │       ├── dnsx.py             # DNS resolution map
 │       ├── nuclei.py           # templated findings (CVEs / exposures)

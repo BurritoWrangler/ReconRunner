@@ -49,6 +49,87 @@ def test_nmap_udp_merge():
     assert any(svc.port == 161 and svc.proto == "udp" for svc in inv.services)
 
 
+def _curated_finding(port, script_id, output, name="tcpwrapped"):
+    inv = nmap.Inventory()
+    inv.add(nmap.Service(host="10.0.0.1", port=port, proto="tcp", state="open",
+                         name=name, scripts={script_id: output}))
+    return [f for f in nmap.inventory_findings(inv) if f.category != "service"]
+
+
+def test_nmap_eternalblue_finding():
+    # Real smb-vuln-ms17-010 output uses the vulns-library "State: VULNERABLE" token.
+    out = ("VULNERABLE:\nRemote Code Execution vulnerability in Microsoft "
+           "SMBv1 servers (ms17-010)\n  State: VULNERABLE\n  IDs:  CVE:CVE-2017-0143")
+    fs = _curated_finding(445, "smb-vuln-ms17-010", out, name="microsoft-ds")
+    assert fs, "EternalBlue script output produced no curated finding"
+    f = fs[0]
+    assert f.severity == "critical"
+    assert "EternalBlue" in f.title and "MS17-010" in f.title
+    assert "CVE-2017-0143" in f.references
+    assert "MS17-010" in f.references
+    assert "smb-vuln-ms17-010" in f.source_tools
+    # No duplicate: the generic VULNERABLE handler must not also fire.
+    assert len(fs) == 1
+
+
+def test_nmap_bluekeep_finding():
+    out = ("VULNERABLE:\nRemote Code Execution vulnerability in Microsoft RDP "
+           "(CVE-2019-0708)\n  State: VULNERABLE")
+    fs = _curated_finding(3389, "rdp-vuln-cve-2019-0708", out, name="ms-wbt-server")
+    assert fs, "BlueKeep script output produced no curated finding"
+    f = fs[0]
+    assert f.severity == "critical"
+    assert "BlueKeep" in f.title
+    assert "CVE-2019-0708" in f.references
+    assert len(fs) == 1
+
+
+def test_nmap_cisco_smart_install_finding():
+    # cisco-siet (third-party NSE) prints "Status: VULNERABLE" when the Smart
+    # Install service is vulnerable to abuse / CVE-2018-0171 RCE.
+    fs = _curated_finding(4786, "cisco-siet", "Host: 10.0.0.1\nStatus: VULNERABLE",
+                          name="smart-install")
+    assert fs, "cisco-siet 'Status: VULNERABLE' produced no curated finding"
+    f = fs[0]
+    assert f.severity == "high"
+    assert "Smart Install" in f.title
+    assert "CVE-2018-0171" in f.references
+    assert len(fs) == 1
+
+
+def test_nmap_ftp_anon_finding():
+    fs = _curated_finding(21, "ftp-anon", "Anonymous FTP login allowed (FTP code 230)",
+                          name="ftp")
+    assert fs, "ftp-anon output produced no curated finding"
+    f = fs[0]
+    assert f.severity == "low"
+    assert f.category == "exposure"
+    assert "Anonymous FTP" in f.title
+    # No CVE for the exposure category.
+    assert not any(r.startswith("CVE-") for r in f.references)
+
+
+def test_nmap_curated_not_fired_on_negatives():
+    # Positive markers are exact tokens; negatives must not trigger a curated
+    # OR generic finding.
+    assert not _curated_finding(445, "smb-vuln-ms17-010",
+                                "This system is patched.", name="microsoft-ds")
+    # "Status: NOT VULNERABLE" must not match "Status: VULNERABLE" (curated) and
+    # must also be suppressed by the generic handler's NOT-VULNERABLE guard.
+    assert not _curated_finding(4786, "cisco-siet",
+                                "Host: 10.0.0.1\nStatus: NOT VULNERABLE",
+                                name="smart-install")
+
+
+def test_preview_nmap_vuln_default_scripts():
+    line = commands.preview("nmap_vuln", {})[0]
+    assert "smb-vuln-ms17-010" in line
+    assert "rdp-vuln-cve-2019-0708" in line
+    assert "cisco-siet" in line
+    assert "ftp-anon" in line
+    assert "--script" in line
+
+
 # ---- web pipeline -----------------------------------------------------------
 
 def test_httpx_parse():
