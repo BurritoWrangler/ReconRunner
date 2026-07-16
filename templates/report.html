@@ -165,6 +165,31 @@
   </div>
   {% endif %}
 
+  {% if coverage_rows %}
+  <h2>Coverage matrix</h2>
+  <p class="small muted">Every module: installed? ran? status. Missing default-ON tools
+  carry their install hint and the consequence for the report. Availability reflects
+  the scanning host's PATH.</p>
+  <table>
+    <thead><tr><th>Module</th><th>Phase</th><th>Gating</th><th>Installed</th>
+    <th>Ran</th><th>Status</th><th>#</th><th>Note</th></tr></thead>
+    <tbody>
+    {% for r in coverage_rows %}
+      <tr>
+        <td class="small"><strong>{{ r.name }}</strong><div class="muted small">{{ r.id }}</div></td>
+        <td class="small">{{ r.phase }}</td>
+        <td class="small">{{ r.gating }}</td>
+        <td>{% if r.installed %}✓{% else %}<span class="err">✗</span>{% endif %}</td>
+        <td>{% if r.ran %}✓{% else %}—{% endif %}</td>
+        <td class="small">{{ r.status }}</td>
+        <td>{{ r.n_findings }}</td>
+        <td class="small">{{ r.note }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
   {% if software_exploits %}
   <h2>⚠ Software with known exploits</h2>
   <p class="small muted">Detected software whose <strong>exact version</strong> matches a public
@@ -271,10 +296,13 @@
 
   <h2>Web applications</h2>
   <p class="small muted">Live web surface confirmed by httpx (status / title / server / tech).
-  Each URL is a testing entry point.</p>
+  Each URL is a testing entry point. Rows marked <em>nmap/whatweb (httpx missing)</em>
+  are a fallback synthesized from the nmap inventory because httpx did not run —
+  no live status/title, so validate before relying on them.</p>
   {% if web_apps %}
   <table>
-    <thead><tr><th>URL</th><th>Status</th><th>Title</th><th>Server</th><th>Technology</th></tr></thead>
+    <thead><tr><th>URL</th><th>Status</th><th>Title</th><th>Server</th>
+    <th>Technology</th><th>Source</th></tr></thead>
     <tbody>
     {% for w in web_apps %}
       <tr>
@@ -283,6 +311,7 @@
         <td class="small">{{ w.title or '—' }}</td>
         <td class="small">{{ w.webserver or '—' }}</td>
         <td class="small">{{ (w.tech|join(', ')) if w.tech else '—' }}</td>
+        <td class="small">{{ w.source or 'httpx' }}</td>
       </tr>
     {% endfor %}
     </tbody>

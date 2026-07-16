@@ -11,7 +11,7 @@ import time
 from flask import (Flask, abort, flash, jsonify, redirect, render_template,
                    request, send_file, url_for)
 
-from pentest import commands, tools
+from pentest import commands, coverage, tools
 from pentest.config import ScanConfig
 from pentest.engine import ScanEngine
 from pentest.store import Store
@@ -82,7 +82,8 @@ def new_scan():
     cfg = ScanConfig.defaults()
     cfg.scan_name = "external-pentest"
     return render_template("config.html", phases=_build_phases(cfg),
-                           gvals=_globals_from(cfg, ""))
+                           gvals=_globals_from(cfg, ""),
+                           missing_default_on=coverage.missing_default_on())
 
 
 @app.route("/scan", methods=["POST"])
@@ -99,7 +100,8 @@ def create_scan():
             flash(e, "error")
         raw_targets = targets_text or request.form.get("targets", "")
         return render_template("config.html", phases=_build_phases(cfg),
-                               gvals=_globals_from(cfg, raw_targets)), 400
+                               gvals=_globals_from(cfg, raw_targets),
+                               missing_default_on=coverage.missing_default_on()), 400
 
     scan_id, _ws = engine.submit(cfg)
     flash(f"Scan started for {cfg.customer_name} ({len(cfg.targets)} target(s)).",

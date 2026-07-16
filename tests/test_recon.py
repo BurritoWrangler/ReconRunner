@@ -1033,3 +1033,107 @@ def test_report_lists_nuclei_cves(tmp_path):
     report.generate(str(tmp_path), cfg, state, inv, ranked, [])
     html = (tmp_path / "report.html").read_text()
     assert "Known CVEs" in html and "CVE-2021-41773" in html
+
+
+# ---- coverage assurance (v1.10.0) ------------------------------------------
+
+def test_coverage_install_hints():
+    from pentest import coverage
+    # Go tools carry a pinned go install command.
+    assert "go install" in coverage.install_hint("httpx")
+    assert "v1.10.0" in coverage.install_hint("httpx")
+    assert coverage.install_hint("gowitness").endswith("@3.1.1")
+    # apt tools carry an apt install command.
+    assert coverage.install_hint("nmap_tcp") == "apt install nmap"
+    assert "apt install" in coverage.install_hint("sslscan")
+
+
+def test_coverage_missing_default_on(monkeypatch):
+    from pentest import tools, coverage
+    real_which = tools.which
+    monkeypatch.setattr(tools, "which",
+                        lambda b: None if b in ("httpx", "gowitness") else real_which(b))
+    missing_ids = {m.id for m in coverage.missing_default_on()}
+    assert "httpx" in missing_ids and "gowitness" in missing_ids
+    # A default-OFF tool (sslyze) is never "missing default-ON" even if absent.
+    assert "sslyze" not in missing_ids
+
+
+def test_coverage_rows_missing_note_has_hint_and_consequence(monkeypatch):
+    from pentest import tools, coverage
+    from pentest.parsers import nmap
+    real_which = tools.which
+    monkeypatch.setattr(tools, "which", lambda b: None if b == "httpx" else real_which(b))
+    inv = nmap.parse_xml(s("nmap_tcp.xml"))
+    rows = coverage.coverage_rows(inv, {"modules": {}}, [])
+    httpx_row = next(r for r in rows if r["id"] == "httpx")
+    assert httpx_row["installed"] is False
+    assert httpx_row["note"].startswith("MISSING")
+    assert "install:" in httpx_row["note"]
+    assert "Web applications section falls back" in httpx_row["note"]
+
+
+def test_web_apps_fallback_when_httpx_missing(tmp_path):
+    """With no httpx.jsonl, web_apps are synthesized from the nmap inventory and
+    marked as a fallback (source = 'nmap/whatweb (httpx missing)')."""
+    import shutil as _sh
+    from pentest.engine import ScanEngine
+    from pentest.store import Store
+    store = Store(base_dir=str(tmp_path))
+    engine = ScanEngine(store)
+    ws = str(tmp_path / "ws")
+    os.makedirs(os.path.join(ws, "nmap"))
+    _sh.copyfile(s("nmap_tcp.xml"), os.path.join(ws, "nmap", "tcp.xml"))
+    inv, _findings, _exploits, web_apps = engine._gather(ws, {"modules": {}})
+    assert web_apps, "web_apps should fall back to nmap when httpx is missing"
+    assert all(w.get("source", "").startswith("nmap/whatweb") for w in web_apps)
+    inv_urls = {svc.url() for svc in inv.web_services()}
+    assert {w["url"] for w in web_apps} <= inv_urls
+
+
+def test_web_apps_no_fallback_when_httpx_present(tmp_path):
+    """When httpx.jsonl is present, web_apps come from httpx (no fallback marker)."""
+    import shutil as _sh
+    from pentest.engine import ScanEngine
+    from pentest.store import Store
+    store = Store(base_dir=str(tmp_path))
+    engine = ScanEngine(store)
+    ws = str(tmp_path / "ws")
+    os.makedirs(os.path.join(ws, "nmap"))
+    _sh.copyfile(s("nmap_tcp.xml"), os.path.join(ws, "nmap", "tcp.xml"))
+    _sh.copyfile(s("httpx.jsonl"), os.path.join(ws, "httpx.jsonl"))
+    _inv, _f, _e, web_apps = engine._gather(ws, {"modules": {}})
+    assert web_apps, "httpx.jsonl has 2 entries"
+    assert all("httpx missing" not in (w.get("source") or "") for w in web_apps)
+
+
+def test_report_renders_coverage_matrix(tmp_path, monkeypatch):
+    from pentest import report, coverage, tools
+    from pentest.parsers import nmap
+    real_which = tools.which
+    monkeypatch.setattr(tools, "which", lambda b: None if b == "httpx" else real_which(b))
+    inv = nmap.parse_xml(s("nmap_tcp.xml"))
+    cfg = ScanConfig.defaults()
+    state = {"id": "t", "customer": "c", "scan_name": "s", "created_at": 0,
+             "modules": {}}
+    rows = coverage.coverage_rows(inv, state, [])
+    report.generate(str(tmp_path), cfg, state, inv, [], [], coverage_rows=rows)
+    html = (tmp_path / "report.html").read_text()
+    assert "Coverage matrix" in html
+    httpx_row = next(r for r in rows if r["id"] == "httpx")
+    assert "Web applications section falls back" in httpx_row["note"]
+
+
+def test_check_tools_exits_nonzero_when_missing(monkeypatch):
+    from pentest import tools
+    from pentest.cli import main
+    real_which = tools.which
+    monkeypatch.setattr(tools, "which", lambda b: None if b == "httpx" else real_which(b))
+    assert main(["--check-tools"]) == 1
+
+
+def test_check_tools_exits_zero_when_all_present(monkeypatch):
+    from pentest import tools
+    from pentest.cli import main
+    monkeypatch.setattr(tools, "which", lambda b: "/usr/bin/" + b)
+    assert main(["--check-tools"]) == 0

@@ -3,6 +3,16 @@
 {% block content %}
 <div class="page-head"><h1>New scan</h1></div>
 
+{% if missing_default_on %}
+<div class="warn">
+  <strong>Default-ON tools missing on this host:</strong>
+  {% for m in missing_default_on %}{{ m.name }} ({{ m.binary }}){% if not loop.last %}, {% endif %}{% endfor %}.
+  Their report sections will be empty or a fallback. Install them — run
+  <code>./setup.sh</code> on Kali or <code>./run.sh cli -- --check-tools</code> —
+  before a real scan.
+</div>
+{% endif %}
+
 <form method="post" action="{{ url_for('create_scan') }}" enctype="multipart/form-data"
       id="scan-form">
 
