@@ -220,13 +220,104 @@ def test_exposure_boosts_sensitive_service():
 
 def test_merge_dedup_corroboration():
     a = Finding(title="Same", severity="medium", category="tls",
-                assets=["h:443"], source_tools=["sslscan"], confidence=0.6)
+                assets=["h:443"], source_tools=["sslscan"], confidence=0.6,
+                proofs=[findings.proof("sslscan", "sslscan output")])
     b = Finding(title="Same", severity="high", category="tls",
-                assets=["h:443"], source_tools=["sslyze"], confidence=0.6)
+                assets=["h:443"], source_tools=["sslyze"], confidence=0.6,
+                proofs=[findings.proof("sslyze", "sslyze output")])
     merged = findings.merge([a, b])
     assert len(merged) == 1
     assert merged[0].severity == "high"
     assert set(merged[0].source_tools) == {"sslscan", "sslyze"}
+    # Both tools' proofs survive dedup.
+    assert len(merged[0].proofs) == 2
+    assert {p["tool"] for p in merged[0].proofs} == {"sslscan", "sslyze"}
+
+
+def test_heuristic_flag_low_confidence():
+    f = Finding(title="x", severity="medium", confidence=0.5)
+    assert f.heuristic() is True
+    assert f.to_dict()["heuristic"] is True
+    f2 = Finding(title="y", severity="medium", confidence=0.9)
+    assert f2.heuristic() is False
+
+
+def test_proofs_dedup_no_duplicate_on_remerge():
+    p = [findings.proof("sslscan", "out")]
+    a = Finding(title="z", severity="medium", category="tls",
+                assets=["h:443"], source_tools=["sslscan"], proofs=p)
+    # Merging the same finding twice must not double the proof.
+    merged = findings.merge([a, a])
+    assert len(merged[0].proofs) == 1
+
+
+def test_parser_emits_proof():
+    fs = nuclei.parse(s("nuclei.jsonl"))
+    f = next((x for x in fs if x.category == "cve"), None)
+    assert f and f.proofs, "nuclei finding has no proof"
+    assert f.proofs[0]["tool"] == "nuclei"
+    assert "template:" in f.proofs[0]["output"]
+    # EternalBlue curated NSE finding carries the script output as its proof.
+    eb = _curated_finding(445, "smb-vuln-ms17-010",
+                          "State: VULNERABLE\nIDs: CVE:CVE-2017-0143",
+                          name="microsoft-ds")[0]
+    assert eb.proofs and eb.proofs[0]["tool"] == "smb-vuln-ms17-010"
+    assert "VULNERABLE" in eb.proofs[0]["output"]
+
+
+def test_report_renders_proofs_webapps_and_heuristic(tmp_path):
+    inv = nmap.parse_xml(s("nmap_tcp.xml"))
+    lo = Finding(title="Heuristic XSS", severity="low", category="exposure",
+                 assets=["h:80"], confidence=0.5,
+                 proofs=[findings.proof("nikto", "reflected param")])
+    hi = Finding(title="CVE-2021-42013 Apache RCE", severity="critical",
+                 category="cve", assets=["web.example.com:80"], confidence=0.85,
+                 proofs=[findings.proof("nuclei", "template: CVE-2021-42013\nmatched")])
+    ranked = findings.prioritize(nmap.inventory_findings(inv) + [lo, hi])
+    cfg = ScanConfig.defaults()
+    cfg.customer_name = "c"
+    state = {"id": "t", "customer": "c", "scan_name": "s", "created_at": 0,
+             "modules": {}}
+    web_apps = [{"url": "http://web.example.com:80", "status": 200,
+                 "title": "Home", "webserver": "Apache", "tech": ["PHP"]}]
+    tool_issues = [{"module": "nikto", "label": "nikto", "status": "missing",
+                    "error": "nikto: not found", "command": "nikto ..."}]
+    report.generate(str(tmp_path), cfg, state, inv, ranked, [],
+                    web_apps=web_apps, tool_issues=tool_issues)
+    html = (tmp_path / "report.html").read_text()
+    # Proof block: tool name + output rendered.
+    assert "<details><summary><span class=\"ptool\">nuclei</span>" in html
+    assert "template: CVE-2021-42013" in html
+    # Web applications section.
+    assert "Web applications" in html and "web.example.com:80" in html
+    # Coverage notes callout.
+    assert "Coverage notes" in html and "nikto" in html and "not found" in html
+    # Heuristic flag + validate note for the low-confidence finding.
+    assert "heuristic" in html and "validate before acting" in html
+    assert "confidence 50%" in html
+
+
+def test_gather_isolates_parser_failures(tmp_path, monkeypatch):
+    """One parser raising must not sink the report — others still gathered."""
+    from pentest.engine import ScanEngine
+    from pentest.store import Store, new_scan_id
+    monkeypatch.setattr("pentest.engine.tools.Module.available", lambda self: True)
+    store = Store(base_dir=str(tmp_path))
+    eng = ScanEngine(store)
+    cfg = ScanConfig.defaults()
+    cfg.customer_name = "acme"
+    cfg.authorized = True
+    cfg.targets = ["192.0.2.10"]
+    ws = store.create_workspace(cfg, new_scan_id())
+    _wjsonl(os.path.join(ws, "dnsx.jsonl"), [{"host": "h", "a": ["1.2.3.4"]}])
+    # Make one parser blow up; _gather must still return the rest.
+    def boom(*a, **k):
+        raise RuntimeError("boom")
+    monkeypatch.setattr("pentest.engine.nuclei.parse", boom)
+    inv, found, _exploits, web_apps = eng._gather(ws, state={"log": []})
+    # dnsx still parsed despite nuclei raising.
+    assert any(t == "dnsx" for f in found for t in f.source_tools)
+    assert inv.services or web_apps or found  # not all empty
 
 
 # ---- command builder --------------------------------------------------------
@@ -586,7 +677,7 @@ def test_engine_gathers_all_tools(tmp_path, monkeypatch):
     _wjson(os.path.join(ws, "bruteforce", "h_ssh.json"),
            {"results": [{"host": "h", "login": "r", "password": "p", "service": "ssh"}]})
     _wjsonl(os.path.join(ws, "dnsx.jsonl"), [{"host": "h", "a": ["1.2.3.4"]}])
-    inv, found, _ = eng._gather(ws)
+    inv, found, _, web_apps = eng._gather(ws)
     tools_seen = {t for f in found for t in f.source_tools}
     for tool in ("nikto", "testssl", "wpscan", "ffuf", "katana", "dnsx"):
         assert tool in tools_seen, f"{tool} output not gathered into report"

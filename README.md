@@ -3,9 +3,15 @@
 A self-hosted web app that drives an **external network penetration test** from a
 single, per-scan configurable frontend. Upload a host file (one IP/FQDN per line),
 and the backend runs an NMAP discovery sweep (full TCP + top-1000 UDP), then fans
-out service-appropriate tooling and produces a self-contained HTML report with
-open services, software versions with known public exploits, outdated software,
-and a prioritized findings list.
+out service-appropriate tooling and produces a self-contained, **actionable**
+HTML report. Each prioritized finding carries a per-tool **proof block** — the
+tool name and its raw output snippet — so a pentester can validate and act on
+the report directly. The report also includes open services, live web
+applications, software versions with known public exploits, outdated software,
+known CVEs, and a **coverage notes** callout that surfaces any tool that failed
+or timed out, so a "clean" result is never trusted blindly. Low-confidence /
+heuristic findings are flagged with a confidence percentage and a
+"validate before acting" note.
 
 > **Authorized testing only.** Only scan hosts you have explicit, written
 > permission to test. The app requires an authorization acknowledgement before
@@ -19,7 +25,7 @@ Config page ─▶ Phase 0: dnsx (resolve/validate)
               EternalBlue/BlueKeep/Cisco Smart Install/ftp-anon)
             ─▶ Phase 2: service-driven modules (gated by what nmap found open)
             ─▶ Phase 3: correlate + prioritize + outdated-software
-            ─▶ Phase 4: self-contained HTML report
+            ─▶ Phase 4: self-contained HTML report (per-finding proofs + coverage notes)
 ```
 
 Every active test is **gated on the nmap results** — a module only runs against a
@@ -28,6 +34,39 @@ subdomain enumeration and passive URL recon, which are **off by default**.
 
 All per-tool output is written under `results_<CUSTOMERNAME>/<scan-id>/`, including
 a `logs/` directory that captures every module's stdout+stderr.
+
+## Report contents
+
+The generated `report.html` is built to be read and acted on as a pentester. In
+order, it contains:
+
+- **Executive summary** — severity counts (critical/high/medium/low) and total
+  findings.
+- **Coverage notes** — any module that errored, timed out, or produced no output,
+  with the failing command and error text. If a tool is missing, its section may
+  be empty — confirm coverage before trusting a "clean" result.
+- **Software with known exploits** — detected software whose *exact version*
+  matches a public Exploit-DB entry (version confirmed in the exploit title).
+- **Known CVEs** — every CVE surfaced (nuclei, nmap vulners, version
+  correlation), with the detecting tool(s) and affected assets.
+- **Prioritized findings** — ranked by severity + exploitability. Each row shows
+  the finding, assets, score, source tool(s), confidence %, remediation, and
+  references. Heuristic / low-confidence findings are badged and carry a
+  "validate before acting" warning. Expand the **proof block** under any finding
+  to see the exact tool and raw output that produced it.
+- **Open services** — host/port/proto/service/product+version/TLS, straight from
+  the nmap inventory.
+- **Web applications** — live web surface confirmed by httpx
+  (URL/status/title/server/tech); each URL is a testing entry point.
+- **Outdated / version-flagged software** — detected versions flagged where a
+  public exploit or known-vuln match exists.
+- **Web screenshots** — gowitness captures of live web apps.
+- **Appendix — tools executed** — every command run, its status, duration, and
+  error text; full stdout/stderr is saved under `logs/`.
+
+The report is self-contained (inline CSS, base64 screenshots) and renders in any
+browser; toggle the **dark hacker / light printable** theme from the config page
+or `--theme`.
 
 ## Quick start (macOS or Linux)
 

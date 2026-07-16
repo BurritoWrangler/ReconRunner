@@ -107,6 +107,21 @@
          border-top:1px dashed var(--line);padding-top:14px}
 </style>
 {% endif %}
+<style>
+  /* Shared across themes: proof blocks, coverage callout, web-apps table. */
+  .proof{margin-top:6px}
+  .proof details{border:1px solid var(--line);border-radius:6px;padding:4px 8px;background:rgba(127,127,127,.04)}
+  .proof pre{margin:6px 0 0;white-space:pre-wrap;word-break:break-word;font:12px/1.4 var(--mono,'JetBrains Mono',ui-monospace,Consolas,monospace);
+    background:rgba(0,0,0,.18);border:1px solid var(--line);border-radius:6px;padding:8px;max-height:260px;overflow:auto;color:var(--ink)}
+  .proof .ptool{font-weight:700;color:var(--accent)}
+  .heur{display:inline-block;background:var(--med);color:#1a1600;padding:1px 7px;border-radius:6px;
+        font-size:11px;font-weight:700;margin-left:6px}
+  .conf{font-size:11px;color:var(--muted);margin-left:6px}
+  .coverage{border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin:10px 0;background:rgba(255,212,0,.05)}
+  .coverage ul{margin:6px 0 0;padding-left:18px}
+  .coverage li{margin:2px 0}
+  .err{color:var(--crit)}
+</style>
 </head>
 <body>
 <div class="wrap">
@@ -134,6 +149,21 @@
     {% endfor %}
     <div class="card"><div class="n">{{ total_findings }}</div><div class="l">Total findings</div></div>
   </div>
+
+  {% if tool_issues %}
+  <h2>Coverage notes</h2>
+  <div class="coverage small">
+    <strong>The following tools did not complete cleanly</strong> — their results may be
+    missing from the sections below. Verify coverage before relying on a "clean"
+    result; install or re-run the affected tool.
+    <ul>
+    {% for t in tool_issues %}
+      <li><strong>{{ t.module }}</strong> ({{ t.status }}){% if t.error %}: <span class="err">{{ t.error }}</span>{% endif %}
+      {% if t.command %}<div class="muted small">{{ t.command }}</div>{% endif %}</li>
+    {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
 
   {% if software_exploits %}
   <h2>⚠ Software with known exploits</h2>
@@ -192,15 +222,25 @@
       <tr>
         <td>{{ f.rank }}</td>
         <td><span class="badge sev-{{ f.severity }}">{{ f.severity }}</span>
-            {% if f.exploitable %}<div class="small exploit">exploit</div>{% endif %}</td>
+            {% if f.exploitable %}<div class="small exploit">exploit</div>{% endif %}
+            {% if f.heuristic %}<div class="heur">heuristic</div>{% endif %}</td>
         <td>
-          <strong>{{ f.title }}</strong>
+          <strong>{{ f.title }}</strong><span class="conf">confidence {{ (f.confidence*100)|int }}%</span>
           {% if f.evidence %}<div class="small muted">{{ f.evidence }}</div>{% endif %}
+          {% if f.heuristic %}<div class="small err">⚠ Heuristic / low-confidence — validate before acting.</div>{% endif %}
           {% if f.remediation %}<div class="small"><em>Fix:</em> {{ f.remediation }}</div>{% endif %}
           {% if f.references %}<div class="refs">
             {% for r in f.references %}{% if r.startswith('http') %}
               <a href="{{ r }}">{{ r }}</a>{% else %}<span class="pill">{{ r }}</span>{% endif %}
             {% endfor %}</div>{% endif %}
+          {% if f.proofs %}<div class="proof">
+            {% for p in f.proofs %}
+            <details><summary><span class="ptool">{{ p.tool }}</span> — proof output</summary>
+              {% if p.command %}<div class="muted small">{{ p.command }}</div>{% endif %}
+              <pre>{{ p.output }}</pre>
+            </details>
+            {% endfor %}
+          </div>{% endif %}
         </td>
         <td class="small">{% for a in f.assets %}<div>{{ a }}</div>{% else %}—{% endfor %}</td>
         <td>{{ f.score }}</td>
@@ -228,6 +268,26 @@
     </tbody>
   </table>
   {% else %}<p class="muted">No open services discovered.</p>{% endif %}
+
+  <h2>Web applications</h2>
+  <p class="small muted">Live web surface confirmed by httpx (status / title / server / tech).
+  Each URL is a testing entry point.</p>
+  {% if web_apps %}
+  <table>
+    <thead><tr><th>URL</th><th>Status</th><th>Title</th><th>Server</th><th>Technology</th></tr></thead>
+    <tbody>
+    {% for w in web_apps %}
+      <tr>
+        <td>{{ w.url }}</td>
+        <td>{{ w.status or '—' }}</td>
+        <td class="small">{{ w.title or '—' }}</td>
+        <td class="small">{{ w.webserver or '—' }}</td>
+        <td class="small">{{ (w.tech|join(', ')) if w.tech else '—' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">No live web applications found (run httpx, or none responded).</p>{% endif %}
 
   <h2>Outdated / version-flagged software</h2>
   <p class="small muted">Heuristic: software with a detected version, flagged where a
@@ -270,7 +330,7 @@
     {% for a in appendix %}
       <tr><td class="small">{{ a.module }}</td>
           <td><code class="small">{{ a.command }}</code></td>
-          <td class="small">{{ a.status }}</td>
+          <td class="small">{{ a.status }}{% if a.error %} <span class="err">{{ a.error }}</span>{% endif %}</td>
           <td class="small">{{ a.duration if a.duration is not none else '' }}</td></tr>
     {% endfor %}
     </tbody>
