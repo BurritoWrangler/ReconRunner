@@ -134,6 +134,10 @@ Useful flags: `--enable/--disable/--only <ids>`, `--no-root` (nmap `-sT`),
 `--rate-limit/--timeout/--concurrency`, `--set nuclei.severities=high,critical`,
 and `--confirm-bruteforce`. `--authorize` is required for real scans.
 
+`--timeout N` **opts in** to bounding the nmap port + vuln NSE scans (default:
+untimed — those scans run as long as they need; set a positive N to kill them
+after N seconds). Other tools always run untimed.
+
 ## Running real scans (Kali Linux)
 
 Real scans shell out to external CLI tools. The config page shows a green/red

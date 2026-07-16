@@ -31,8 +31,8 @@
         Running as root (use nmap <code>-sS</code>; unticked falls back to <code>-sT</code>)</label>
     </div>
     <div class="row">
-      <label>nmap scan timeout (s)<input type="number" name="module_timeout" value="{{ gvals.module_timeout }}" min="30">
-        <small>Bounds the nmap port + vuln scans; other tools run untimed.</small></label>
+      <label>nmap scan timeout (s)<input type="number" name="module_timeout" value="{{ gvals.module_timeout }}" min="0">
+        <small>0 = untimed (default). Enter seconds to bound the nmap port + vuln scans; other tools always run untimed.</small></label>
       <label>Max concurrency<input type="number" name="max_concurrency" value="{{ gvals.max_concurrency }}" min="1"></label>
       <label>Global rate limit<input type="number" name="rate_limit" value="{{ gvals.rate_limit }}" min="1"></label>
       <label>Report theme

@@ -893,6 +893,21 @@ def test_engine_timeout_only_for_port_scans():
     assert PORT_SCAN_MODULES == {"nmap_tcp", "nmap_udp"}
 
 
+def test_engine_timeout_default_untimed():
+    """By default (module_timeout == 0) nothing is bounded — not even the port
+    scans. A timeout is only applied when the user opts in to a positive value."""
+    from pentest.engine import ScanEngine
+    eng = ScanEngine()
+    cfg = ScanConfig.defaults()          # module_timeout defaults to 0
+    assert cfg.module_timeout == 0
+    # Port scans are untimed unless the user sets a positive timeout.
+    assert eng._timeout_for(cfg, "nmap_tcp") is None
+    assert eng._timeout_for(cfg, "nmap_udp") is None
+    # Opting in (positive value) bounds them again.
+    cfg.module_timeout = 900
+    assert eng._timeout_for(cfg, "nmap_tcp") == 900
+
+
 def test_nmap_vuln_runs_async_and_bounded(tmp_path, monkeypatch):
     """nmap_vuln must run off the main thread (so it can't block the pipeline)
     AND be bounded by the configured timeout (so it can't hang forever)."""
@@ -938,6 +953,41 @@ def test_nmap_vuln_runs_async_and_bounded(tmp_path, monkeypatch):
     # stayed inline on the calling thread.
     assert all(c["thread"].startswith("nmap-vuln") for c in vuln_calls)
     assert not any(c["thread"].startswith("nmap-vuln") for c in tcp_calls)
+
+
+def test_nmap_vuln_default_untimed(tmp_path, monkeypatch):
+    """With the default module_timeout (0) the background nmap_vuln scan runs
+    untimed (timeout=None) — the user must opt in to bound it."""
+    import threading
+    from pentest import engine as eng_mod
+    from pentest.engine import ScanEngine
+    from pentest.store import Store
+
+    calls = []
+
+    def fake_run_specs(specs, ws, timeout=None, on_output=None, resume=False):
+        labels = [sp.label for sp in specs]
+        calls.append({"labels": labels, "timeout": timeout,
+                      "thread": threading.current_thread().name})
+        return [{"label": lb, "command": "x", "status": "ok",
+                 "duration": 0.1, "error": "", "log": ""} for lb in labels]
+
+    monkeypatch.setattr(eng_mod, "run_specs", fake_run_specs)
+    monkeypatch.setattr(eng_mod.tools.Module, "available", lambda self: True)
+
+    store = Store(base_dir=str(tmp_path))
+    engine = ScanEngine(store)
+    cfg = ScanConfig.defaults()          # module_timeout == 0 (untimed)
+    cfg.customer_name = "acme"
+    cfg.authorized = True
+    cfg.targets = ["192.0.2.10"]
+    for mid in list(cfg.modules):
+        cfg.modules[mid]["enabled"] = mid in ("nmap_tcp", "nmap_vuln")
+
+    ws, state = engine.run_sync(cfg)
+    assert state["status"] == "done"
+    vuln_calls = [c for c in calls if "nmap_vuln" in c["labels"]]
+    assert vuln_calls and all(c["timeout"] is None for c in vuln_calls)
 
 
 def test_run_spec_timeout_is_graceful(tmp_path):
