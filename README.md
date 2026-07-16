@@ -267,6 +267,59 @@ be removed from the overview page.
 Tests run anywhere (no scanning tools required) — they exercise the parsers
 against the committed sample outputs in `samples/`.
 
+## Releasing
+
+Cut a versioned release as a clean, self-contained archive. The golden rule:
+**export from git, never zip the working folder.** `zip -r` and `tar` on the live
+checkout ignore `.gitignore` and will ship `.venv/` (full of symlinks that break
+on extract), `results_*/`, and caches. `git archive` only exports tracked files,
+so none of that leaks in.
+
+```bash
+REL=v1.9.0
+
+# 1. Pre-flight — green suite + clean tree
+./run.sh test            # all tests pass
+./run.sh demo            # report renders from bundled samples
+git status --short       # clean, or stage only intended changes
+
+# 2. Commit + annotated tag (include Co-Authored-By attribution)
+git add -A
+git commit -m "<summary>"
+git tag -a "$REL" -m "$REL — <one-line summary>"
+
+# 3. Export a clean snapshot into a sibling folder (no .venv / caches / results)
+mkdir -p ../"recon-runner-$REL"
+git archive "$REL" | tar -x -C ../"recon-runner-$REL"
+
+# 4. VERSION marker (points at the commit the tag resolves to)
+printf 'recon-runner\nversion: %s\ncommit:  %s\ntag:     %s\nsource:  git archive %s\n' \
+  "$REL" "$(git rev-list -n 1 "$REL")" "$REL" "$REL" \
+  > ../"recon-runner-$REL"/VERSION
+
+# 5. Portable archives from the CLEAN export (safe to zip here — no venv inside)
+tar -czf ../"recon-runner-$REL".tar.gz -C .. "recon-runner-$REL"
+( cd .. && zip -r -q "recon-runner-$REL".zip "recon-runner-$REL" )
+
+# 6. Verify the extracted release runs standalone (bootstraps a fresh .venv)
+( cd ../"recon-runner-$REL" && ./run.sh test && ./run.sh demo )
+
+# 7. Publish (if a remote is configured)
+git push origin main "$REL"
+```
+
+Recipients install from an archive with no special steps — `./run.sh` recreates
+the `.venv` on first run:
+
+```bash
+unzip recon-runner-v1.9.0.zip && cd recon-runner-v1.9.0
+./run.sh demo    # smoke-test (renders a report, no scanning tools needed)
+./run.sh         # launch the web UI
+```
+
+The release archives themselves are gitignored (`recon-runner-*.zip`,
+`recon-runner-*.tar.gz` in `.gitignore`), so they won't be committed by accident.
+
 ## Project structure
 
 ```text

@@ -5,11 +5,30 @@ results_*/
 __pycache__/
 *.py[cod]
 *.egg-info/
+.eggs/
+build/
+dist/
 .pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments (machine-specific; run.sh recreates .venv on first run)
 .venv/
 venv/
 env/
 
+# Release archives generated from `git archive` — never commit the bundles
+recon-runner-*.zip
+recon-runner-*.tar.gz
+
+# Env files (keep secrets out of history)
+.env
+
 # OS / editor
 .DS_Store
 *.swp
+.idea/
+.vscode/
