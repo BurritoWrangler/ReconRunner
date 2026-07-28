@@ -78,6 +78,8 @@ h1,h2,h3{color:var(--bright)}
 .btn:hover{background:var(--btn-hover);box-shadow:0 0 14px var(--glow);text-decoration:none}
 .btn-ghost{color:var(--ink);border-color:var(--line)}
 .btn-ghost:hover{color:var(--accent);border-color:var(--accent)}
+.btn-ghost.danger{color:#d33b5a;border-color:rgba(255,46,99,.4)}
+.btn-ghost.danger:hover{background:rgba(255,46,99,.1);border-color:#d33b5a}
 .btn-lg{padding:11px 24px;font-size:15px}
 
 /* panels */
@@ -150,6 +152,7 @@ table.grid tbody tr:hover{background:var(--row-hover)}
 .status-done{background:rgba(0,180,110,.14);color:var(--accent);border:1px solid var(--line)}
 .status-error{background:rgba(255,46,99,.14);color:#d33b5a;border:1px solid rgba(255,46,99,.4)}
 .status-interrupted{background:rgba(255,123,26,.14);color:#b8651a;border:1px solid rgba(255,123,26,.4)}
+.status-cancelled{background:rgba(255,123,26,.14);color:#b8651a;border:1px solid rgba(255,123,26,.4)}
 /* link-styled buttons for table row actions (resume/delete) */
 .linkbtn{background:none;border:none;padding:0;margin:0;font:inherit;color:var(--accent2);
          cursor:pointer;text-transform:none;letter-spacing:0}

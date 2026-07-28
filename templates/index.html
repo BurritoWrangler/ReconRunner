@@ -7,6 +7,12 @@
     <form method="post" action="{{ url_for('start_demo') }}" style="display:inline">
       <button class="btn btn-ghost" type="submit">Run demo scan</button>
     </form>
+    <form method="post" action="{{ url_for('scan_import') }}" enctype="multipart/form-data" style="display:inline">
+      <label class="btn btn-ghost" style="cursor:pointer">
+        Import scan <input type="file" name="archive" accept=".tar.gz,.tgz" style="display:none"
+                           onchange="this.form.submit()">
+      </label>
+    </form>
     <a class="btn" href="{{ url_for('new_scan') }}">+ New scan</a>
   </div>
 </div>
@@ -36,7 +42,7 @@
       <td class="small">
         <a href="{{ url_for('scan_status', scan_id=s.id) }}">status</a>
         {% if s.report %} · <a href="{{ url_for('scan_report', scan_id=s.id) }}">report</a>{% endif %}
-        {% if s.status in ['interrupted', 'error'] %}
+        {% if s.status in ['interrupted', 'error', 'cancelled'] %}
          · <form method="post" action="{{ url_for('scan_resume', scan_id=s.id) }}" style="display:inline">
             <button class="linkbtn" type="submit">resume</button>
           </form>
