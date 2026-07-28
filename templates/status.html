@@ -4,13 +4,23 @@
 <div class="page-head">
   <h1>{{ state.scan_name }} <span class="muted small">/ {{ state.customer }}</span></h1>
   <div class="actions">
-    {% if state.status in ['interrupted', 'error'] %}
+    {% if state.status == 'running' %}
+    <form method="post" action="{{ url_for('scan_cancel', scan_id=state.id) }}" style="display:inline"
+          onsubmit="return confirm('Cancel this scan? It will stop after the current tool finishes.');">
+      <button class="btn btn-ghost danger" type="submit">Cancel scan</button>
+    </form>
+    <form method="post" action="{{ url_for('scan_partial_report', scan_id=state.id) }}" style="display:inline">
+      <button class="btn btn-ghost" type="submit">Partial report</button>
+    </form>
+    {% endif %}
+    {% if state.status in ['interrupted', 'error', 'cancelled'] %}
     <form method="post" action="{{ url_for('scan_resume', scan_id=state.id) }}" style="display:inline">
       <button class="btn" type="submit">Resume scan</button>
     </form>
     {% endif %}
     <a class="btn btn-ghost" id="report-link" href="{{ url_for('scan_report', scan_id=state.id) }}"
        style="{% if not state.report %}display:none{% endif %}">View report</a>
+    <a class="btn btn-ghost" href="{{ url_for('scan_export', scan_id=state.id) }}">Export</a>
   </div>
 </div>
 
