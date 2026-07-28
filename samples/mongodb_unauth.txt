@@ -1,0 +1,27 @@
+{
+	"databases" : [
+		{
+			"name" : "admin",
+			"sizeOnDisk" : 40960,
+			"empty" : false
+		},
+		{
+			"name" : "config",
+			"sizeOnDisk" : 40960,
+			"empty" : false
+		},
+		{
+			"name" : "local",
+			"sizeOnDisk" : 73728,
+			"empty" : false
+		},
+		{
+			"name" : "customer_data",
+			"sizeOnDisk" : 1048576,
+			"empty" : false
+		}
+	],
+	"totalSize" : 1187840,
+	"totalSizeMb" : 1,
+	"ok" : 1
+}

@@ -1,0 +1,6 @@
+{
+	"ok" : 0,
+	"errmsg" : "command listDatabases requires authentication",
+	"code" : 13,
+	"codeName" : "Unauthorized"
+}

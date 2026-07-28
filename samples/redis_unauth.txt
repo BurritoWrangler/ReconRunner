@@ -1,0 +1,9 @@
+# Server
+redis_version:7.0.5
+redis_git_sha1:00000000
+redis_git_dirty:0
+redis_build_id:abc123def456
+redis_mode:standalone
+os:Linux 6.1.0-kali1-amd64
+arch_bits:64
+multiplexing_api:epoll

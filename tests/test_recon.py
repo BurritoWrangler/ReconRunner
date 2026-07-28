@@ -11,8 +11,8 @@ from pentest import commands, config, findings, report, software
 from pentest.config import ScanConfig
 from pentest.findings import Finding
 from pentest.parsers import (bruteforce, content, dnsrecon, dnsx, gowitness,
-                             generic, httpx, nmap, nikto, nuclei, recon,
-                             searchsploit, shcheck, smb, sslscan, sshaudit,
+                             generic, httpx, mongodb, nmap, nikto, nuclei, recon,
+                             redis, searchsploit, shcheck, smb, sslscan, sshaudit,
                              testssl, whatweb, wpscan)
 
 SAMPLES = os.path.join(os.path.dirname(__file__), "..", "samples")
@@ -1137,3 +1137,75 @@ def test_check_tools_exits_zero_when_all_present(monkeypatch):
     from pentest.cli import main
     monkeypatch.setattr(tools, "which", lambda b: "/usr/bin/" + b)
     assert main(["--check-tools"]) == 0
+
+
+# ---- Redis + MongoDB unauth checks (v1.11.0) -------------------------------
+
+def test_redis_unauth_is_critical(tmp_path):
+    import shutil as _sh
+    # Real per-service artifact filename: <host>_<port>.txt
+    dest = tmp_path / "10.0.2.5_6379.txt"
+    _sh.copyfile(s("redis_unauth.txt"), dest)
+    fs = redis.parse(str(dest))
+    assert len(fs) == 1
+    f = fs[0]
+    assert f.severity == "critical" and f.category == "exposure"
+    assert f.source_tools == ["redis-cli"]
+    assert f.assets == ["10.0.2.5:6379"]   # hostport_from_path
+    assert "redis-cli" in f.proofs[0]["tool"]
+    assert "7.0.5" in f.evidence
+
+
+def test_redis_auth_no_finding():
+    assert redis.parse(s("redis_auth.txt")) == []
+
+
+def test_mongodb_unauth_is_critical(tmp_path):
+    import shutil as _sh
+    dest = tmp_path / "db.example.com_27017.txt"
+    _sh.copyfile(s("mongodb_unauth.txt"), dest)
+    fs = mongodb.parse(str(dest))
+    assert len(fs) == 1
+    f = fs[0]
+    assert f.severity == "critical" and f.category == "exposure"
+    assert f.source_tools == ["mongo"]
+    assert f.assets == ["db.example.com:27017"]
+    assert "customer_data" in f.evidence   # db name surfaced in evidence
+
+
+def test_mongodb_auth_no_finding():
+    assert mongodb.parse(s("mongodb_auth.txt")) == []
+
+
+def test_redis_mongodb_command_preview():
+    r = commands.preview("redis", {})[0]
+    assert "redis-cli" in r and "INFO" in r and "--no-auth-warning" in r
+    m = commands.preview("mongodb", {})[0]
+    assert "mongo" in m and "listDatabases" in m and "printjson" in m
+
+
+def test_redis_mongodb_gating_and_defaults():
+    from pentest import tools, commands as cmd_mod
+    r = tools.module_by_id("redis")
+    assert r.default_enabled and r.gating == "port" and 6379 in r.trigger_ports
+    assert cmd_mod.run_scope("redis") == "per_service"
+    m = tools.module_by_id("mongodb")
+    assert m.default_enabled and 27017 in m.trigger_ports
+    assert cmd_mod.run_scope("mongodb") == "per_service"
+
+
+def test_redis_parse_dir_picks_up_artifacts(tmp_path):
+    import shutil as _sh
+    d = tmp_path / "redis"
+    d.mkdir()
+    _sh.copyfile(s("redis_unauth.txt"), d / "10.0.2.5_6379.txt")
+    fs = redis.parse_dir(str(d))
+    assert len(fs) == 1 and fs[0].severity == "critical"
+
+
+def test_coverage_lists_redis_mongodb_hints():
+    from pentest import coverage
+    assert coverage.install_hint("redis") == "apt install redis-tools"
+    assert "mongodb-clients" in coverage.install_hint("mongodb")
+    assert "Redis" in coverage.consequence("redis")
+    assert coverage.coverage_rows(None, {}, [])  # does not crash w/ empty inv
