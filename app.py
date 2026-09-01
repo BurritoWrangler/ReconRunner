@@ -13,12 +13,13 @@ from __future__ import annotations
 import functools
 import os
 import secrets
+import tempfile
 import time
 
 from flask import (Flask, Response, abort, flash, jsonify, redirect,
                    render_template, request, send_file, url_for)
 
-from pentest import commands, coverage, tools
+from pentest import archive, commands, coverage, tools
 from pentest.config import ScanConfig
 from pentest.engine import ScanEngine
 from pentest.store import Store
@@ -305,8 +306,6 @@ def scan_report_download(scan_id):
 @app.route("/scan/<scan_id>/export")
 def scan_export(scan_id):
     """Export a scan workspace as a tar.gz archive for transfer/archival."""
-    import tarfile
-    import tempfile
 
     ws, state = store.find_scan(scan_id)
     if not state:
@@ -316,13 +315,27 @@ def scan_export(scan_id):
     customer = state.get("customer_safe", "scan")
     archive_name = f"recon_{customer}_{scan_id}.tar.gz"
     tmp = tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False)
+    tmp.close()
     try:
-        with tarfile.open(tmp.name, "w:gz") as tar:
-            tar.add(ws, arcname=scan_id)
-        return send_file(tmp.name, as_attachment=True, download_name=archive_name,
-                         mimetype="application/gzip")
-    except Exception:
+        archive.export_scan_archive(ws, scan_id, tmp.name)
+    except archive.ArchiveError:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
         abort(500)
+
+    response = send_file(tmp.name, as_attachment=True, download_name=archive_name,
+                         mimetype="application/gzip")
+
+    def _cleanup_export():
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+
+    response.call_on_close(_cleanup_export)
+    return response
 
 
 @app.route("/scan/import", methods=["POST"])
@@ -332,8 +345,6 @@ def scan_import():
     Extracts into the appropriate results_<customer>/ directory and registers
     the scan in the store index.
     """
-    import tarfile
-    import tempfile
 
     upload = request.files.get("archive")
     if not upload or not upload.filename:
@@ -342,69 +353,15 @@ def scan_import():
 
     # Save upload to temp file.
     tmp = tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False)
+    tmp.close()
     try:
         upload.save(tmp.name)
-        tmp.close()
-
-        # Validate it's a tar.gz and peek at the scan_id (top-level dir name).
-        if not tarfile.is_tarfile(tmp.name):
-            flash("Uploaded file is not a valid tar.gz archive.", "error")
-            return redirect(url_for("index"))
-
-        with tarfile.open(tmp.name, "r:gz") as tar:
-            # Security: reject archives with absolute paths or path traversal.
-            members = tar.getmembers()
-            for m in members:
-                if m.name.startswith("/") or ".." in m.name:
-                    flash("Archive contains unsafe paths — rejected.", "error")
-                    return redirect(url_for("index"))
-
-            # The top-level directory is the scan_id.
-            top_dirs = {m.name.split("/", 1)[0] for m in members if "/" in m.name}
-            if len(top_dirs) != 1:
-                flash("Archive must contain exactly one scan directory.", "error")
-                return redirect(url_for("index"))
-
-            scan_id = top_dirs.pop()
-
-            # Read config.json from the archive to determine the customer.
-            config_path = f"{scan_id}/config.json"
-            try:
-                cfg_member = tar.getmember(config_path)
-                cfg_fh = tar.extractfile(cfg_member)
-                if cfg_fh:
-                    import json
-                    cfg_data = json.load(cfg_fh)
-                    customer_safe = cfg_data.get("customer_safe") or \
-                        cfg_data.get("customer_name", "imported").replace(" ", "_")
-                else:
-                    customer_safe = "imported"
-            except (KeyError, ValueError):
-                customer_safe = "imported"
-
-            # Extract to the results directory.
-            dest_root = os.path.join(store.base_dir, f"results_{customer_safe}")
-            os.makedirs(dest_root, exist_ok=True)
-            dest_ws = os.path.join(dest_root, scan_id)
-
-            if os.path.exists(dest_ws):
-                flash(f"Scan {scan_id} already exists — delete it first to reimport.",
-                      "error")
-                return redirect(url_for("index"))
-
-            tar.extractall(path=dest_root)
-
-        # Register in the store index.
-        from pentest.store import is_valid_scan_id
-        if is_valid_scan_id(scan_id) and os.path.isfile(
-                os.path.join(dest_ws, "state.json")):
-            with store._index_lock:
-                store._index[scan_id] = dest_ws
-            flash(f"Scan imported successfully: {scan_id}", "success")
-            return redirect(url_for("scan_status", scan_id=scan_id))
-        else:
-            flash("Archive imported but scan_id format is unrecognized.", "warning")
-            return redirect(url_for("index"))
+        result = archive.import_scan_archive(tmp.name, store)
+        flash(f"Scan imported successfully: {result.scan_id}", "success")
+        return redirect(url_for("scan_status", scan_id=result.scan_id))
+    except archive.ArchiveError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("index"))
     finally:
         try:
             os.unlink(tmp.name)
