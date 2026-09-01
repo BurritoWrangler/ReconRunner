@@ -91,6 +91,21 @@ Run as root (`sudo ./run.sh`) only if you want nmap `-sS`/UDP raw scans; without
 root the UI uses nmap `-sT` connect scans. Set `RECON_HOST`/`RECON_PORT`/
 `RECON_DEBUG` env vars to override the bind.
 
+> **Moved the folder between machines/OSes?** `.venv` is machine-specific: a
+> virtualenv created on macOS points at macOS Python paths and is unusable on
+> Linux (its dangling symlinks can also trip file scanners with errors like
+> *"Dangerous link via another link"*). `run.sh` now detects a stale/foreign
+> `.venv` and rebuilds it automatically. If anything else stumbles on it first,
+> just delete it — it's disposable and gitignored — and re-run:
+>
+> ```bash
+> rm -rf .venv && ./run.sh
+> ```
+>
+> Better yet, transfer the code with `git clone` (or `git archive`) rather than
+> copying the working folder, so `.venv/`, `results_*/` and caches never come
+> along.
+
 On **Kali Linux** (the intended runtime for real scans), run the setup script to
 install *everything* in one shot — system packages, the full scanning toolset
 (apt + Go tools), `shcheck.py`, nuclei templates, and the Python virtualenv:
@@ -337,6 +352,7 @@ recon-runner/
 ├── .gitignore                  # ignores results_*/, venvs, caches
 ├── pentest/                    # core package — shared by the web app and the CLI
 │   ├── __init__.py
+│   ├── archive.py              # safe scan-archive export/import (validated tar.gz)
 │   ├── config.py               # ScanConfig: targets, customer, options, report_theme, validation
 │   ├── tools.py                # module/tool registry, option schema, availability, severities
 │   ├── commands.py             # command builder (config preview == executed command)
@@ -380,6 +396,7 @@ recon-runner/
 │   └── screens/                # demo screenshots referenced by gowitness.jsonl
 ├── tests/                      # pytest — run anywhere, no scanning tools required
 │   ├── test_recon.py           # parsers, prioritization, report, theme, delete/resume
+│   ├── test_archive.py         # scan-archive round trip + malicious-archive rejection
 │   └── test_cli.py             # CLI: dry-run, list-*, nmap-xml ingestion, theme flag
 ├── docs/                       # theme preview screenshots
 │   ├── config_preview.png  config_preview_dark.png

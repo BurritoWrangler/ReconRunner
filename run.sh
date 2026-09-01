@@ -34,6 +34,17 @@ ensure_venv() {
     return
   fi
   command -v python3 >/dev/null 2>&1 || { c_r "python3 not found. Install Python 3 first."; exit 1; }
+  # A .venv copied between machines/OSes (e.g. a macOS venv moved onto Kali) has
+  # interpreter symlinks pointing at paths that don't exist here — the venv is
+  # unusable and its dangling/chained symlinks can trip file scanners
+  # ("Dangerous link via another link"). If a .venv exists but its interpreter
+  # can't run, it's stale: remove it so we rebuild cleanly for THIS machine.
+  if [ -d "$VENV" ]; then
+    if [ ! -x "$PY" ] || ! "$PY" -c 'import sys' >/dev/null 2>&1; then
+      c_y "Existing $VENV is broken or from another machine/OS — recreating it."
+      rm -rf "$VENV"
+    fi
+  fi
   c_g "Bootstrapping Python virtualenv ($VENV) + app deps (one-time)"
   python3 -m venv "$VENV"
   "$PY" -m pip install --quiet --upgrade pip
