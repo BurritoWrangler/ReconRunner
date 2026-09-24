@@ -362,6 +362,8 @@ recon-runner/
 │   ├── findings.py             # Finding model, dedup/merge, prioritization scoring
 │   ├── report.py               # build context + render report.html (dark/light)
 │   ├── cli.py                  # argparse CLI: --hosts|--nmap-xml, --dry-run, --list-*, --demo
+│   ├── coverage.py             # coverage assurance: missing/failed tools never silently blank a section
+│   ├── software.py             # precise version enumeration + searchsploit exploit correlation
 │   └── parsers/                # tolerant tool-output parsers -> Findings / inventory
 │       ├── __init__.py
 │       ├── util.py             # shared JSON/JSONL readers
@@ -378,6 +380,14 @@ recon-runner/
 │       ├── sshaudit.py          # SSH CVEs / weak algorithms
 │       ├── smb.py               # enum4linux-ng + smbmap: shares / null sessions
 │       ├── dnsrecon.py          # DNS records + zone transfer (AXFR)
+│       ├── redis.py             # Redis unauthenticated-access check
+│       ├── mongodb.py           # MongoDB unauthenticated-access check
+│       ├── nikto.py             # web server scan findings
+│       ├── testssl.py           # deep TLS findings (Heartbleed / ROBOT / ...)
+│       ├── wpscan.py            # WordPress audit findings
+│       ├── content.py           # ffuf / feroxbuster content discovery
+│       ├── bruteforce.py        # hydra / medusa / ncrack credential results
+│       ├── recon.py             # katana / gau / waybackurls / subfinder / amass recon
 │       └── generic.py           # SNMP / IKE / SMTP heuristics
 ├── templates/                  # Jinja2 templates
 │   ├── base.html               # shared layout (top bar, flashes)
@@ -393,6 +403,7 @@ recon-runner/
 │   ├── sslscan_example.xml  whatweb_example.json  shcheck_example.json
 │   ├── searchsploit.json  sshaudit_example.json  gowitness.jsonl  snmp_onesixtyone.txt
 │   ├── enum4linux_example.json  smbmap_example.txt  dnsrecon_example.json  dnsrecon_example.txt
+│   ├── redis_unauth.txt  redis_auth.txt  mongodb_unauth.txt  mongodb_auth.txt
 │   └── screens/                # demo screenshots referenced by gowitness.jsonl
 ├── tests/                      # pytest — run anywhere, no scanning tools required
 │   ├── test_recon.py           # parsers, prioritization, report, theme, delete/resume
@@ -406,6 +417,7 @@ recon-runner/
 ```
 
 Data flow: `config.py` (ScanConfig) -> `engine.py` (phases) -> `commands.py` +
-`runner.py` (execute) -> `parsers/` -> `findings.py` (prioritize) -> `report.py`.
+`runner.py` (execute) -> `parsers/` -> `findings.py` (prioritize) +
+`software.py` (exploit correlation) -> `report.py` (`coverage.py` assurance).
 The **web app** (`app.py`) and **CLI** (`recon_cli.py`/`pentest/cli.py`) are thin
 front-ends over the same `pentest/` core.
