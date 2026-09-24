@@ -447,6 +447,26 @@ def test_runner_creates_output_dirs(tmp_path):
     assert (tmp_path / "sslscan").is_dir()   # sslscan --xml= parent
 
 
+def test_ensure_output_dirs_ignores_non_path_token_containing_ws(tmp_path, monkeypatch):
+    """A `sh -c` script body that merely embeds the workspace string must NOT be
+    treated as an output path — otherwise makedirs(dirname(<script>)) creates a
+    junk directory tree under the CWD (the bug that left a `trap 'echo flushed >`
+    directory in the repo root, triggered by test_run_spec_timeout_is_graceful).
+    Real ws-rooted output paths must still be honoured.
+    """
+    from pentest import runner
+    monkeypatch.chdir(tmp_path)
+    ws = str(tmp_path)
+    # A script token (as built by test_run_spec_timeout_is_graceful) that embeds
+    # a ws-rooted redirection target but is NOT itself a path.
+    script = f"trap 'echo flushed > {ws}/flushed.txt; exit 0' TERM; sleep 5 & wait"
+    runner._ensure_output_dirs(["sh", "-c", script], ws)
+    assert os.listdir(tmp_path) == []        # no junk directory created
+
+    runner._ensure_output_dirs(["nmap", "-oA", f"{ws}/nmap/tcp"], ws)
+    assert (tmp_path / "nmap").is_dir()      # real ws-rooted path still handled
+
+
 # ---- software version enumeration + exploit correlation --------------------
 
 def test_is_precise():
