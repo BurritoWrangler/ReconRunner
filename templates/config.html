@@ -30,6 +30,7 @@
     <div class="row">
       <label class="grow">Targets — one IP or FQDN per line
         <textarea name="targets" rows="6" placeholder="192.0.2.10&#10;mail.example.com&#10;vpn.example.com">{{ gvals.targets }}</textarea>
+        <small>Bare IPv4/IPv6 addresses, hostnames, CIDRs, or IPv4 ranges. URLs and host:port values are rejected, not silently changed.</small>
       </label>
       <label class="grow">…or upload a host file
         <input type="file" name="hostfile" accept=".txt,.lst,text/plain">
@@ -39,12 +40,14 @@
     <div class="row">
       <label class="check"><input type="checkbox" name="run_as_root" {% if gvals.run_as_root %}checked{% endif %}>
         Running as root (use nmap <code>-sS</code>; unticked falls back to <code>-sT</code>)</label>
+      <small>This changes the TCP scan type only. UDP/raw scans may still require privileges; disable those modules when unavailable.</small>
     </div>
     <div class="row">
       <label>nmap scan timeout (s)<input type="number" name="module_timeout" value="{{ gvals.module_timeout }}" min="0">
         <small>0 = untimed (default). Enter seconds to bound the nmap port + vuln scans; other tools always run untimed.</small></label>
-      <label>Max concurrency<input type="number" name="max_concurrency" value="{{ gvals.max_concurrency }}" min="1"></label>
-      <label>Global rate limit<input type="number" name="rate_limit" value="{{ gvals.rate_limit }}" min="1"></label>
+      <label>Max concurrency<input type="number" name="max_concurrency" value="{{ gvals.max_concurrency }}" min="1" max="64"></label>
+      <label>Global rate limit<input type="number" name="rate_limit" value="{{ gvals.rate_limit }}" min="0">
+        <small>Supported tools only; 0 = unset. Per-tool rate settings take precedence.</small></label>
       <label>Report theme
         <select name="report_theme">
           <option value="dark" {% if gvals.report_theme != 'light' %}selected{% endif %}>Dark (hacker)</option>
@@ -68,13 +71,18 @@
           <input type="checkbox" name="mod__{{ m.id }}__enabled" {% if m.enabled %}checked{% endif %}>
           <span class="mod-name">{{ m.name }}</span>
         </label>
-        <span class="avail {{ 'ok' if m.available else 'no' }}"
+        <span id="availability-{{ m.id }}" class="avail {{ 'ok' if m.available else 'no' }}"
               title="{% for b,present in m.binaries.items() %}{{ b }}: {{ 'found' if present else 'missing' }}&#10;{% endfor %}">
           {{ m.binary }}{% if not m.available %} — not found{% endif %}
         </span>
       </div>
       <p class="mod-desc">{{ m.description }}</p>
       <p class="mod-why"><strong>Why:</strong> {{ m.why }}</p>
+      {% if m.id == 'wpscan' %}
+      <label class="check"><input type="checkbox" name="mod__wpscan__automatic"
+        {% if m.automatic %}checked{% endif %}>
+        Run only when WordPress is detected (automatic mode; mutually exclusive with enabled)</label>
+      {% endif %}
       {% if m.risk == 'intrusive' %}<p class="warn">Intrusive — requires explicit per-module authorization below.</p>{% endif %}
       {% if m.risk == 'scope' %}<p class="warn scope">Not nmap-gated — can expand scope. Off by default.</p>{% endif %}
 
@@ -109,6 +117,7 @@
       <div class="preview">
         <span class="preview-label">Command{{ 's' if m.preview|length > 1 else '' }}:</span>
         <pre id="preview-{{ m.id }}" class="cmd">{{ m.preview|join('\n') }}</pre>
+        <div id="preview-error-{{ m.id }}" class="small err" role="status" hidden></div>
       </div>
     </div>
     {% endfor %}

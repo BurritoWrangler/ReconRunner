@@ -132,11 +132,14 @@
       <strong>Scan:</strong> {{ scan_name }} &nbsp;·&nbsp;
       <strong>ID:</strong> {{ scan_id }}<br>
       <strong>Generated:</strong> {{ generated }}
-      {% if duration %} &nbsp;·&nbsp; <strong>Duration:</strong> {{ duration }}s{% endif %}
+      {% if duration is not none %} &nbsp;·&nbsp; <strong>Duration:</strong> {{ duration }}s{% endif %}
       &nbsp;·&nbsp; <strong>Scope:</strong> {{ targets|length }} target(s),
       {{ host_count }} live host(s), {{ service_count }} open service(s)
     </div>
     {% if demo %}<div class="demo">DEMO REPORT — generated from bundled sample data</div>{% endif %}
+    <div class="meta"><strong>Execution:</strong> {{ execution_status }}
+      &nbsp;·&nbsp; <strong>Coverage:</strong> {{ coverage_status }}</div>
+    {% if partial %}<div class="coverage">PARTIAL REPORT — completed artifacts only; work remains untested.</div>{% endif %}
   </header>
 
   <h2>Executive summary</h2>
@@ -168,8 +171,9 @@
   {% if coverage_rows %}
   <h2>Coverage matrix</h2>
   <p class="small muted">Every module: installed? ran? status. Missing default-ON tools
-  carry their install hint and the consequence for the report. Availability reflects
-  the scanning host's PATH.</p>
+  carry their install hint and the consequence for the report. New scans record
+  availability and effective module choices on the scanning host; legacy scans
+  without an execution plan remain unverified.</p>
   <table>
     <thead><tr><th>Module</th><th>Phase</th><th>Gating</th><th>Installed</th>
     <th>Ran</th><th>Status</th><th>#</th><th>Note</th></tr></thead>
@@ -251,6 +255,7 @@
             {% if f.heuristic %}<div class="heur">heuristic</div>{% endif %}</td>
         <td>
           <strong>{{ f.title }}</strong><span class="conf">confidence {{ (f.confidence*100)|int }}%</span>
+          {% if 'partial-evidence' in f.tags %}<div class="small err">Partial evidence — a source tool or parser did not complete cleanly. Validate before relying on this result.</div>{% endif %}
           {% if f.evidence %}<div class="small muted">{{ f.evidence }}</div>{% endif %}
           {% if f.heuristic %}<div class="small err">⚠ Heuristic / low-confidence — validate before acting.</div>{% endif %}
           {% if f.remediation %}<div class="small"><em>Fix:</em> {{ f.remediation }}</div>{% endif %}
