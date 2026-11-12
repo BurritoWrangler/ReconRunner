@@ -345,6 +345,93 @@ explicitly authorized activity.
 
 ## Releasing
 
+Before release sign-off, run the opt-in integration verification below. The
+scanner-free unit/DOM suite does not establish installed-tool compatibility.
+
+### Browser and Kali verification (opt-in)
+
+`RECON_RESULTS_DIR` overrides the results parent for both web and CLI runs.
+Existing installations keep the project-root default when it is unset. An
+explicit `Store(base_dir=...)` takes precedence. Samples and templates always
+come from the source package, not the results directory. Browser fixtures set
+this override **before importing the app**, so startup reconciliation never
+touches existing scan workspaces.
+
+Install browser-only development dependencies deliberately; neither normal tests
+nor verification commands download them automatically:
+
+```bash
+.venv/bin/python -m pip install -r requirements-browser.txt
+.venv/bin/python -m playwright install chromium
+./run.sh test-browser
+```
+
+This runs real Chromium against a temporary localhost Flask server. Installed
+scanners and notifications remain blocked; lifecycle tests use a controlled
+local Python stdout fixture. Checks cover form uploads, effective previews,
+preview races, queue ownership, cancel/resume, polling failures, escaped
+diagnostics, dark/light presentation, and standalone downloaded reports.
+Browser requests outside the fixture origin are blocked. Failed checks save
+screenshots and Playwright traces; passing theme checks also save screenshots.
+
+The default suite still needs no browser or scanning tools. To retain a
+scanner-free baseline manifest alongside the browser evidence:
+
+```bash
+./run.sh test --verification-artifacts verification-artifacts
+```
+
+Real-tool checks require an **independently isolated Linux/Kali lab** with
+egress blocked, supported tools already installed, and explicit operator
+approval. This harness does not provision a VM, install scanners, configure a
+firewall, or prove the lab's isolation. The JSON approval fields are operator
+attestations. Never approve an ordinary workstation as an isolated lab.
+
+Copy `tests/compat/example.lab.json` to a gitignored file such as
+`verification.lab.local.json`, identify the actual lab, and set its approval
+and isolation attestations only after the lab is ready. The shipped example
+is deliberately unapproved and cannot run. No target addresses, extra command
+arguments, passive enumeration, brute-force modules, or remote templates are
+accepted by the harness.
+
+Inside the approved lab:
+
+```bash
+./run.sh test-kali --lab-config verification.lab.local.json
+```
+
+Checks target only dynamically allocated **owned loopback HTTP/TLS fixture
+services**. TLS uses a short-lived dummy certificate; private fixture keys stay
+in temporary directories, not evidence exports. User home/config/proxy settings
+are isolated. The initial allowlist covers nmap TCP **connect** discovery,
+httpx, nuclei with owned local templates and Interactsh/updates disabled,
+sslscan, and optional gowitness. Raw TCP/UDP and all other modules are rejected
+or remain unverified; no root/sudo scan is enabled implicitly.
+
+The harness records executable versions/checksums, commands, exit codes, raw
+logs, schema checks, checkpoint reuse, nuclei no-findings output, and httpx
+timeout/cancellation behavior. Missing tools are blocked, not compatible.
+The suite exits nonzero if any selected tool lacks its complete required
+checks—even when pytest itself only reports skips.
+
+Each run creates a unique, gitignored `verification-artifacts/<suite>-.../`
+directory. `manifest.json` is the compatibility matrix for **all 28 modules**:
+unexecuted modules remain unverified and `reliability_signoff` stays false.
+Evidence includes the base commit and source fingerprint for uncommitted
+changes, exact browser/tool versions, outcomes, and whether source changed
+during the run. Source changes during verification make the run fail.
+A dirty-source fingerprint is not a released commit claim.
+Use `--verification-artifacts <parent>` to choose another parent directory.
+Traces can be inspected with `.venv/bin/python -m playwright show-trace <trace.zip>`.
+
+Current readiness: automated scanner-free and Chromium verification can run
+locally; real-tool compatibility remains **unverified until executed in an
+approved lab**. Re-run all required suites against a committed release candidate
+before reliability sign-off. These checks do not close the separate
+authentication, CSRF, secret-redaction, or archive-limit workstreams.
+
+### Packaging a release
+
 Cut a versioned release as a clean, self-contained archive. The golden rule:
 **export from git, never zip the working folder.** `zip -r` and `tar` on the live
 checkout ignore `.gitignore` and will ship `.venv/` (full of symlinks that break

@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "lab_id": "replace-with-your-isolated-lab",
+  "approved": false,
+  "isolated": false,
+  "egress_blocked": false,
+  "target_mode": "owned-loopback-fixtures",
+  "tools": ["nmap_tcp", "httpx", "nuclei", "sslscan"]
+}

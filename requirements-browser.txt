@@ -1,0 +1,4 @@
+# Optional verification dependencies; never installed by ordinary tests.
+-r requirements.txt
+pytest>=7,<9
+playwright>=1.51,<2

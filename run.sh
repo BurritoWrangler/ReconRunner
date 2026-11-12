@@ -8,6 +8,8 @@
 #   ./run.sh              launch the web UI  -> http://127.0.0.1:5000
 #   ./run.sh demo         render a demo report from bundled samples (no tools)
 #   ./run.sh test         run the pytest suite
+#   ./run.sh test-browser opt-in Chromium checks (install requirements-browser.txt first)
+#   ./run.sh test-kali    opt-in Linux lab checks (--lab-config REQUIRED)
 #   ./run.sh cli -- ...   pass-through to recon_cli.py  (e.g. --list-tools)
 #   ./run.sh install      (re)create .venv + install deps, then stop
 #   ./run.sh setup        Kali Linux: install ALL scanning tools (runs setup.sh)
@@ -76,6 +78,17 @@ case "$cmd" in
     ensure_venv
     "$PY" -c 'import pytest' >/dev/null 2>&1 || "$PY" -m pip install --quiet pytest
     exec "$PY" -m pytest -q "$@"
+    ;;
+  test-browser)
+    [ -x "$PY" ] || { c_r "Create .venv with ./run.sh install first."; exit 1; }
+    "$PY" -c 'import pytest, playwright' >/dev/null 2>&1 || {
+      c_r "Install requirements-browser.txt and run: .venv/bin/python -m playwright install chromium"; exit 1;
+    }
+    exec "$PY" -m pytest -q tests/browser --run-browser "$@"
+    ;;
+  test-kali)
+    [ -x "$PY" ] || { c_r "Create .venv first."; exit 1; }
+    exec "$PY" -m pytest -q tests/compat --run-kali "$@"
     ;;
   cli)
     ensure_venv
