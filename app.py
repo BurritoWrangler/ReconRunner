@@ -20,9 +20,11 @@ from flask import (Flask, Response, abort, flash, jsonify, redirect,
                    render_template, request, send_file, url_for)
 
 from pentest import archive, commands, coverage, tools
-from pentest.config import ScanConfig
+from pentest.config import ScanConfig, option_errors
 from pentest.engine import ScanEngine
 from pentest.store import Store
+from pentest.execution import tail as _tail
+from pentest.lifecycle import LifecycleConflict
 
 app = Flask(__name__)
 
@@ -98,8 +100,14 @@ def _build_phases(cfg: ScanConfig) -> list:
         for m in by_phase.get(pkey, []):
             d = m.to_dict()
             d["enabled"] = cfg.module_enabled(m.id)
+            d["automatic"] = m.id in cfg.adaptive_modules
             d["optvals"] = cfg.options(m.id)
-            d["preview"] = commands.preview(m.id, cfg.options(m.id))
+            try:
+                d["preview"] = commands.preview(m.id, cfg.command_options(m.id))
+                d.update(tools.configured_availability(m.id, cfg.command_options(m.id)))
+                d["binary"] = " + ".join(d["binaries"])
+            except (ValueError, TypeError, KeyError):
+                d["preview"] = ["Preview unavailable — correct invalid settings."]
             mods.append(d)
         if mods:
             phases.append({"key": pkey,
@@ -122,28 +130,59 @@ def _globals_from(cfg: ScanConfig, targets_text: str) -> dict:
     }
 
 
-def _tail(path: str, max_lines: int = 200, max_bytes: int = 65536) -> str:
-    """Return the last ``max_lines`` lines of a (possibly large) text file."""
-    try:
-        with open(path, "rb") as fh:
-            fh.seek(0, os.SEEK_END)
-            fh.seek(max(0, fh.tell() - max_bytes))
-            data = fh.read().decode("utf-8", "replace")
-    except OSError:
-        return ""
-    return "\n".join(data.splitlines()[-max_lines:])
+def _scan_view(ws, state):
+    """Derive UI actions and readiness without overwriting persisted scan state."""
+    status = state.get("status")
+    terminal = status in ("done", "error", "cancelled", "interrupted")
+    sid = state.get("id")
+    with engine.lifecycle.lock:
+        owned = sid in engine.lifecycle.owned
+        reading = bool(engine.lifecycle.readers.get(sid))
+    ready = status == "done" and os.path.isfile(os.path.join(ws, "report.html"))
+    artifacts = any(r.get("artifacts") or r.get("files")
+                    for module in state.get("modules", {}).values()
+                    for r in module.get("runs", [])
+                    if r.get("status") not in ("running", "pending"))
+    state.update(terminal=terminal, settled=terminal and not owned, report_ready=ready,
+                 report="report.html" if ready else None)
+    state["actions"] = {
+        "cancel": status in ("queued", "running") and state.get("phase") != "report",
+        "resume": status in ("interrupted", "error", "cancelled") and not owned,
+        "delete": terminal and not owned and not reading,
+        "partial": bool(artifacts) and status != "queued",
+    }
+    if status in ("error", "cancelled", "interrupted"):
+        state["coverage_status"] = "incomplete"
+    elif status == "queued":
+        state["coverage_status"] = "pending"
+    elif terminal and state.get("coverage_status") in (None, "pending"):
+        state["coverage_status"] = "unverified"
+    if not terminal or "coverage_rows" not in state:
+        state["coverage_rows"] = coverage.coverage_rows(None, state)
+    return state
+
+
+@app.errorhandler(LifecycleConflict)
+def lifecycle_conflict(exc):
+    return str(exc), 409
 
 
 # ---- Routes -----------------------------------------------------------------
 
 @app.route("/")
 def index():
-    return render_template("index.html", scans=store.list_scans())
+    scans = []
+    for state in store.list_scans():
+        ws, current = store.find_scan(state["id"])
+        if ws and current:
+            scans.append(_scan_view(ws, current))
+    return render_template("index.html", scans=scans)
 
 
 @app.route("/scan/new")
 def new_scan():
     cfg = ScanConfig.defaults()
+    cfg.run_as_root = os.geteuid() == 0
     cfg.scan_name = "external-pentest"
     return render_template("config.html", phases=_build_phases(cfg),
                            gvals=_globals_from(cfg, ""),
@@ -152,7 +191,7 @@ def new_scan():
 
 @app.route("/scan", methods=["POST"])
 def create_scan():
-    targets_text = ""
+    targets_text = None
     upload = request.files.get("hostfile")
     if upload and upload.filename:
         targets_text = upload.read().decode("utf-8", "replace")
@@ -162,7 +201,7 @@ def create_scan():
     if errors:
         for e in errors:
             flash(e, "error")
-        raw_targets = targets_text or request.form.get("targets", "")
+        raw_targets = targets_text if targets_text is not None else request.form.get("targets", "")
         return render_template("config.html", phases=_build_phases(cfg),
                                gvals=_globals_from(cfg, raw_targets),
                                missing_default_on=coverage.missing_default_on()), 400
@@ -191,15 +230,14 @@ def scan_status(scan_id):
     ws, state = store.find_scan(scan_id)
     if not state:
         abort(404)
-    return render_template("status.html", state=state)
+    return render_template("status.html", state=_scan_view(ws, state))
 
 
 @app.route("/scan/<scan_id>/cancel", methods=["POST"])
 def scan_cancel(scan_id):
-    """Cancel a running scan. It will stop after the current tool finishes."""
+    """Cancel queued work or stop a running scan's process groups."""
     if engine.cancel(scan_id):
-        flash("Cancellation requested — the scan will stop after the current "
-              "tool finishes.", "success")
+        flash("Cancellation requested — active tools are being stopped.", "success")
     else:
         flash("Scan is not running (already finished or not found).", "warning")
     return redirect(url_for("scan_status", scan_id=scan_id))
@@ -207,10 +245,15 @@ def scan_cancel(scan_id):
 
 @app.route("/scan/<scan_id>/delete", methods=["POST"])
 def scan_delete(scan_id):
+    ws, state = store.find_scan(scan_id)
+    if not state:
+        abort(404)
+    if state.get("status") in ("queued", "running", "cancelling"):
+        raise LifecycleConflict("Cancel the scan and wait for it to stop before deleting.")
     if store.delete_scan(scan_id):
         flash("Scan and all its data were deleted.", "success")
     else:
-        flash("Could not delete that scan (not found or refused).", "error")
+        raise LifecycleConflict("The scan is still active or could not be deleted.")
     return redirect(url_for("index"))
 
 
@@ -222,7 +265,8 @@ def scan_resume(scan_id):
     if state.get("status") == "done":
         flash("Scan already completed; nothing to resume.", "warning")
         return redirect(url_for("scan_status", scan_id=scan_id))
-    engine.resume(scan_id)
+    engine.resume(scan_id, confirm_unverified=request.form.get(
+        "confirm_unverified") == "on")
     flash("Resuming scan (completed steps are skipped) …", "success")
     return redirect(url_for("scan_status", scan_id=scan_id))
 
@@ -255,23 +299,49 @@ def api_scan_status(scan_id):
     ws, state = store.find_scan(scan_id)
     if not state:
         abort(404)
+    state = _scan_view(ws, state)
     state["console"] = _tail(os.path.join(ws, "logs", "console.log"))
     # Derived, non-persistent fields for the live UI (wall-clock elapsed).
     started = state.get("started_at")
-    if started:
+    if started and (not state["terminal"] or state.get("ended_at")):
         end = state.get("ended_at") or time.time()
         state["elapsed_seconds"] = max(0, int(end - started))
-    return jsonify(state)
+    response = jsonify(state)
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.route("/api/command-preview", methods=["POST"])
 def api_command_preview():
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify(lines=[], errors=["Expected a JSON object."]), 400
     module_id = data.get("module", "")
-    options = data.get("options", {}) or {}
-    if not tools.module_by_id(module_id):
+    options = data.get("options", {})
+    if not isinstance(module_id, str) or not tools.module_by_id(module_id):
         return jsonify(lines=[]), 404
-    return jsonify(lines=commands.preview(module_id, options))
+    if not isinstance(options, dict):
+        return jsonify(lines=[], errors=["Options must be an object."]), 400
+    errors = option_errors(module_id, options)
+    cfg = ScanConfig.defaults()
+    cfg.modules[module_id]["options"].update(options)
+    if "run_as_root" in data:
+        if not isinstance(data["run_as_root"], bool):
+            errors.append("run_as_root must be a boolean.")
+        else:
+            cfg.run_as_root = data["run_as_root"]
+    if "rate_limit" in data:
+        try:
+            cfg.rate_limit = int(str(data["rate_limit"]).strip())
+            if cfg.rate_limit < 0:
+                raise ValueError
+        except (ValueError, TypeError):
+            errors.append("Rate limit must be a nonnegative integer.")
+    if errors:
+        return jsonify(lines=[], errors=errors), 400
+    effective = cfg.command_options(module_id)
+    return jsonify(lines=commands.preview(module_id, effective),
+                   availability=tools.configured_availability(module_id, effective))
 
 
 @app.route("/api/tools")
@@ -285,10 +355,12 @@ def scan_report(scan_id):
     if not state:
         abort(404)
     path = os.path.join(ws, "report.html")
-    if not os.path.isfile(path):
+    if state.get("status") != "done" or not os.path.isfile(path):
         flash("The report is not ready yet.", "warning")
         return redirect(url_for("scan_status", scan_id=scan_id))
-    return send_file(path)
+    response = send_file(path, conditional=False)
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.route("/scan/<scan_id>/report/download")
@@ -297,7 +369,7 @@ def scan_report_download(scan_id):
     if not state:
         abort(404)
     path = os.path.join(ws, "report.html")
-    if not os.path.isfile(path):
+    if state.get("status") != "done" or not os.path.isfile(path):
         abort(404)
     name = f"report_{state.get('customer_safe', 'scan')}_{scan_id}.html"
     return send_file(path, as_attachment=True, download_name=name)

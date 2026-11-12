@@ -165,6 +165,8 @@ table.grid tbody tr:hover{background:var(--row-hover)}
 .mstat-skip{color:var(--muted)}
 .mstat-warn{color:#d33b5a}
 .mstat-missing{color:#b8651a}
+.err{color:#d33b5a}
+.status-cancelling{background:rgba(255,123,26,.14);color:#b8651a;border:1px solid rgba(255,123,26,.4)}
 #st-modules .mod-row{cursor:pointer}
 #st-modules .mod-detail>td{padding:0;background:var(--code-bg)}
 table.runs{width:100%;border-collapse:collapse}

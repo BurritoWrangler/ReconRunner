@@ -17,34 +17,92 @@
   function refreshPreview(card) {
     if (!window.RECON || !window.RECON.previewUrl) return;
     var body = collectOptions(card);
+    var prefix = "mod__" + body.module + "__";
+    var enabled = card.querySelector('[name="' + prefix + 'enabled"]');
+    var automatic = card.querySelector('[name="' + prefix + 'automatic"]');
+    var pre = document.getElementById("preview-" + body.module);
+    var error = document.getElementById("preview-error-" + body.module);
+    var sequence = (card.__previewSequence || 0) + 1;
+    card.__previewSequence = sequence;
+    if (error) { error.hidden = true; error.textContent = ""; }
+    if (enabled && !enabled.checked && !(automatic && automatic.checked)) {
+      if (pre) pre.textContent = "Disabled — no commands will run.";
+      return;
+    }
+    var root = document.querySelector('[name="run_as_root"]');
+    var rate = document.querySelector('[name="rate_limit"]');
+    if (root) body.run_as_root = root.checked;
+    if (rate) body.rate_limit = rate.value;
+    var ok = true;
     fetch(window.RECON.previewUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    })
-      .then(function (r) { return r.json(); })
-      .then(function (data) {
-        var pre = document.getElementById("preview-" + body.module);
-        if (pre && data.lines) pre.textContent = data.lines.join("\n");
-      })
-      .catch(function () {});
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }).then(function (response) {
+      ok = response.ok;
+      return response.json();
+    }).then(function (data) {
+      if (sequence !== card.__previewSequence) return;
+      if (!ok) throw new Error((data.errors || ["Preview request failed."]).join(" "));
+      if (pre && data.lines) pre.textContent =
+        (automatic && automatic.checked ? "Automatic — only after a matching fingerprint.\n" : "") + data.lines.join("\n");
+      var badge = document.getElementById("availability-" + body.module);
+      if (badge && data.availability) {
+        var availability = data.availability;
+        badge.className = "avail " + (availability.available ? "ok" : "no");
+        badge.textContent = Object.keys(availability.binaries || {}).join(" + ") +
+          (availability.available ? "" : " — not found");
+      }
+    }).catch(function (failure) {
+      if (sequence !== card.__previewSequence) return;
+      if (pre) pre.textContent = "Preview unavailable — correct settings or retry.";
+      if (error) { error.hidden = false; error.textContent = failure.message; }
+    });
+  }
+
+  function schedulePreview(card) {
+    card.__previewSequence = (card.__previewSequence || 0) + 1;
+    if (card.__previewTimer) clearTimeout(card.__previewTimer);
+    card.__previewTimer = setTimeout(function () { refreshPreview(card); }, 250);
   }
 
   function initConfig() {
     var cards = document.querySelectorAll(".module-card");
     if (!cards.length) return;
     cards.forEach(function (card) {
-      card.querySelectorAll(".opt").forEach(function (el) {
-        el.addEventListener("change", function () { refreshPreview(card); });
-        el.addEventListener("input", function () { refreshPreview(card); });
+      var mid = card.getAttribute("data-mid");
+      var enabled = card.querySelector('[name="mod__' + mid + '__enabled"]');
+      var automatic = card.querySelector('[name="mod__' + mid + '__automatic"]');
+      function syncOptions() {
+        var active = (enabled && enabled.checked) || (automatic && automatic.checked);
+        card.querySelectorAll(".opt").forEach(function (el) { el.disabled = !active; });
+      }
+      syncOptions();
+      card.querySelectorAll("input, select").forEach(function (el) {
+        el.addEventListener("change", function () {
+          if (el === enabled && el.checked && automatic) automatic.checked = false;
+          if (el === automatic && el.checked && enabled) enabled.checked = false;
+          syncOptions();
+          schedulePreview(card);
+        });
+        if (el.classList.contains("opt")) el.addEventListener("input", function () { schedulePreview(card); });
+      });
+      if (enabled && !enabled.checked && !(automatic && automatic.checked)) {
+        var pre = document.getElementById("preview-" + mid);
+        if (pre) pre.textContent = "Disabled — no commands will run.";
+      }
+    });
+    ['run_as_root', 'rate_limit'].forEach(function (name) {
+      var global = document.querySelector('[name="' + name + '"]');
+      if (global) global.addEventListener("change", function () {
+        cards.forEach(schedulePreview);
       });
     });
   }
 
   // ---- Status page: poll JSON API ------------------------------------------
   function esc(s) {
-    return String(s == null ? "" : s).replace(/[&<>]/g, function (c) {
-      return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c];
+    return String(s == null ? "" : s).replace(/[&<>'"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[c];
     });
   }
 
@@ -52,7 +110,9 @@
     queued: "Queued", import: "Importing nmap XML",
     discovery: "Discovery — dnsx + nmap", phase2: "Service modules",
     correlate: "Correlating findings", report: "Building report",
-    done: "Complete", interrupted: "Interrupted"
+    done: "Complete", interrupted: "Interrupted", error: "Failed",
+    cancelled: "Cancelled", cancelling: "Stopping active tools",
+    adaptive: "Fingerprint-triggered modules", "vulnerability-results": "Waiting for vulnerability scan"
   };
 
   function fmtDur(sec) {
@@ -66,10 +126,10 @@
 
   function modStatusClass(s) {
     s = String(s || "");
-    if (s.indexOf("error") >= 0 || s.indexOf("timeout") >= 0) return "mstat-warn";
-    if (s.indexOf("missing") >= 0 || s.indexOf("not found") >= 0) return "mstat-missing";
-    if (s.indexOf("skip") >= 0) return "mstat-skip";
-    return "mstat-ok";
+    if (/error|timeout|failed|partial|cancel/.test(s)) return "mstat-warn";
+    if (/missing|not found|unavailable/.test(s)) return "mstat-missing";
+    if (/^ok$|^successful|^demo$/.test(s)) return "mstat-ok";
+    return "mstat-skip";
   }
 
   function runCounts(runs) {
@@ -83,7 +143,18 @@
   }
 
   function renderModules(data) {
-    var modules = data.modules || {};
+    var modules = {};
+    Object.keys(data.modules || {}).forEach(function (mid) { modules[mid] = data.modules[mid]; });
+    Object.keys(data.execution_plan || {}).forEach(function (mid) {
+      var planned = data.execution_plan[mid];
+      modules[mid] = { status: planned.status, note: planned.note || "",
+        runs: ((data.modules || {})[mid] || {}).runs || [] };
+    });
+    (data.coverage_rows || []).forEach(function (row) {
+      if (!modules[row.id]) modules[row.id] = { runs: [] };
+      modules[row.id].status = row.status;
+      modules[row.id].note = row.note;
+    });
     var mids = Object.keys(modules).sort();
     var expanded = window.__reconExpanded || (window.__reconExpanded = {});
     var tbody = document.querySelector("#st-modules tbody");
@@ -97,7 +168,7 @@
         var caret = runs.length ? (open ? "▾ " : "▸ ") : "&nbsp;&nbsp;";
         rows += "<tr class='mod-row' data-mid='" + esc(mid) + "'>" +
           "<td>" + caret + esc(mid) + "</td>" +
-          "<td><span class='mstat " + modStatusClass(m.status) + "'>" + esc(m.status) + "</span></td>" +
+          "<td><span class='mstat " + modStatusClass(m.status) + "'>" + esc(m.status) + "</span><div class='small'>" + esc(m.note || "") + "</div></td>" +
           "<td class='small'>" + esc(runCounts(runs) || String(runs.length)) + "</td>" +
           "<td class='small'>" + (dur ? fmtDur(dur) : "—") + "</td></tr>";
         if (open && runs.length) {
@@ -105,8 +176,9 @@
           runs.forEach(function (r) {
             inner += "<tr><td class='small'>" + esc(r.label) + "</td>" +
               "<td class='small'><span class='mstat " + modStatusClass(r.status) + "'>" + esc(r.status) + "</span></td>" +
-              "<td class='small'>" + (r.duration ? fmtDur(r.duration) : "—") + "</td>" +
-              "<td class='runcmd'>" + esc(r.command || "") + "</td></tr>";
+              "<td class='small'>" + (typeof r.duration === "number" ? fmtDur(r.duration) : "—") + "</td>" +
+              "<td class='runcmd'>" + esc(r.command || "") + "<div class='err'>" +
+              esc([r.error || ""].concat(r.output_warnings || []).filter(Boolean).join(" · ")) + "</div></td></tr>";
           });
           rows += "<tr class='mod-detail'><td colspan='4'><table class='runs'>" +
             "<thead><tr><th>Run</th><th>Status</th><th>Time</th><th>Command</th></tr></thead>" +
@@ -127,14 +199,14 @@
       if (mids.length) {
         var sum = { ok: 0, skipped: 0, errors: 0, missing: 0 };
         mids.forEach(function (mid) {
-          var st = String(modules[mid].status || "");
-          if (st.indexOf("error") >= 0 || st.indexOf("timeout") >= 0) sum.errors++;
-          else if (st.indexOf("missing") >= 0 || st.indexOf("not found") >= 0) sum.missing++;
-          else if (st.indexOf("skip") >= 0) sum.skipped++;
-          else sum.ok++;
+          var kind = modStatusClass(modules[mid].status);
+          if (kind === "mstat-warn") sum.errors++;
+          else if (kind === "mstat-missing") sum.missing++;
+          else if (kind === "mstat-ok") sum.ok++;
+          else sum.skipped++;
         });
         ms.textContent = mids.length + " modules — " + sum.ok + " ok · " +
-          sum.skipped + " skipped · " + sum.errors + " with errors · " + sum.missing + " tool-missing";
+          sum.skipped + " pending/disabled/skipped · " + sum.errors + " with errors · " + sum.missing + " tool-missing";
       } else {
         ms.textContent = "";
       }
@@ -147,13 +219,30 @@
     if (stt) { stt.textContent = data.status; stt.className = "status status-" + data.status; }
     var ph = document.getElementById("st-phase");
     if (ph) ph.textContent = PHASE_LABELS[data.phase] || data.phase || "";
+    var actions = data.actions || {};
+    ["cancel", "resume", "partial"].forEach(function (action) {
+      var form = document.getElementById(action + "-action");
+      if (form) {
+        form.style.display = actions[action] ? "inline" : "none";
+        var button = form.querySelector("button");
+        if (button) button.disabled = false;
+      }
+    });
+    var connection = document.getElementById("st-connection");
+    if (connection) connection.hidden = true;
+    var err = document.getElementById("st-error");
+    if (err) { err.textContent = data.error || ""; err.hidden = !data.error; }
+    var cov = document.getElementById("st-coverage");
+    if (cov) cov.textContent = "Coverage: " + (data.coverage_status || "pending");
+    var warning = document.getElementById("st-coverage-warning");
+    if (warning) warning.hidden = data.coverage_status !== "incomplete";
     var el = document.getElementById("st-elapsed");
     if (el && typeof data.elapsed_seconds === "number") {
       el.textContent = (data.status === "done" ? "took " : "elapsed ") + fmtDur(data.elapsed_seconds);
     }
 
     var prog = data.progress || { total: 0, completed: 0 };
-    var pct = prog.total ? Math.round((prog.completed / prog.total) * 100) : (data.status === "done" ? 100 : 0);
+    var pct = prog.total ? Math.min(100, Math.max(0, Math.round(((prog.completed || 0) / prog.total) * 100))) : (data.status === "done" ? 100 : 0);
     var bar = document.getElementById("st-bar");
     if (bar) bar.style.width = pct + "%";
     var pl = document.getElementById("st-progress");
@@ -170,28 +259,44 @@
       con.scrollTop = con.scrollHeight;
     }
 
-    if (data.report) {
-      var link = document.getElementById("report-link");
-      if (link) link.style.display = "";
-    }
-    return data.status === "done" || data.status === "error";
+    var link = document.getElementById("report-link");
+    if (link) link.style.display = data.report_ready ? "" : "none";
+    if (typeof data.settled === "boolean") return data.settled;
+    return data.terminal === true || ["done", "error", "cancelled", "interrupted"].indexOf(data.status) >= 0;
   }
 
   function initStatus() {
     var panel = document.getElementById("scan-status");
     if (!panel || !window.RECON || !window.RECON.statusUrl) return;
-    var timer = null;
     function tick() {
-      fetch(window.RECON.statusUrl)
-        .then(function (r) { return r.json(); })
-        .then(function (data) {
-          var done = renderStatus(data);
-          if (done && timer) { clearInterval(timer); }
-        })
-        .catch(function () {});
+      var controller = window.AbortController ? new window.AbortController() : null;
+      var watchdog = controller ? setTimeout(function () { controller.abort(); }, 10000) : null;
+      var permanent = false;
+      fetch(window.RECON.statusUrl, { cache: "no-store", signal: controller ? controller.signal : undefined })
+        .then(function (response) {
+          if (!response.ok) {
+            permanent = [401, 403, 404].indexOf(response.status) >= 0;
+            throw new Error(response.status === 404 ? "Scan no longer exists." :
+              "Status request failed (" + response.status + "). Reload or check access.");
+          }
+          return response.json();
+        }).then(function (data) {
+          if (watchdog) clearTimeout(watchdog);
+          if (!renderStatus(data)) setTimeout(tick, 2000);
+        }).catch(function (error) {
+          if (watchdog) clearTimeout(watchdog);
+          var el = document.getElementById("st-connection");
+          if (el) { el.hidden = false; el.textContent = error.name === "AbortError" ?
+            "Status request timed out; retrying." : error.message; }
+          ["cancel", "resume", "partial"].forEach(function (action) {
+            var form = document.getElementById(action + "-action");
+            var button = form && form.querySelector("button");
+            if (button) button.disabled = true;
+          });
+          if (!permanent) setTimeout(tick, 5000);
+        });
     }
     tick();
-    timer = setInterval(tick, 2000);
   }
 
   // ---- Theme toggle (light/dark) ------------------------------------------
@@ -214,6 +319,11 @@
       try { localStorage.setItem("recon-theme", next); } catch (e) {}
       applyThemeIcon(next);
     });
+  }
+
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = { renderStatus: renderStatus, initStatus: initStatus,
+      refreshPreview: refreshPreview, initConfig: initConfig };
   }
 
   document.addEventListener("DOMContentLoaded", function () {

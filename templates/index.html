@@ -42,15 +42,20 @@
       <td class="small">
         <a href="{{ url_for('scan_status', scan_id=s.id) }}">status</a>
         {% if s.report %} · <a href="{{ url_for('scan_report', scan_id=s.id) }}">report</a>{% endif %}
-        {% if s.status in ['interrupted', 'error', 'cancelled'] %}
+        {% if s.actions.resume %}
          · <form method="post" action="{{ url_for('scan_resume', scan_id=s.id) }}" style="display:inline">
+            {% if s.get('schema_version', 1) < 2 %}
+            <label><input type="checkbox" name="confirm_unverified" required>Rerun unverified work</label>
+            {% endif %}
             <button class="linkbtn" type="submit">resume</button>
           </form>
         {% endif %}
+        {% if s.actions.delete %}
          · <form method="post" action="{{ url_for('scan_delete', scan_id=s.id) }}" style="display:inline"
               onsubmit="return confirm('Delete this scan and all of its data? This cannot be undone.');">
             <button class="linkbtn danger" type="submit">delete</button>
           </form>
+        {% endif %}
       </td>
     </tr>
   {% endfor %}

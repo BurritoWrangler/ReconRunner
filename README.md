@@ -32,8 +32,9 @@ Every active test is **gated on the nmap results** — a module only runs agains
 host/port that the TCP/UDP scan found open. The only non-nmap-gated modules are
 subdomain enumeration and passive URL recon, which are **off by default**.
 
-All per-tool output is written under `results_<CUSTOMERNAME>/<scan-id>/`, including
-a `logs/` directory that captures every module's stdout+stderr.
+All per-tool output is written under `results_<CUSTOMERNAME>/<scan-id>/`.
+Task-specific stdout/stderr and artifacts are retained under `attempts/`;
+`logs/console.log` provides the combined live console.
 
 ## Report contents
 
@@ -149,6 +150,19 @@ Useful flags: `--enable/--disable/--only <ids>`, `--no-root` (nmap `-sT`),
 `--rate-limit/--timeout/--concurrency`, `--set nuclei.severities=high,critical`,
 and `--confirm-bruteforce`. `--authorize` is required for real scans.
 
+Use `--automatic wpscan` for fingerprint-triggered WordPress checks instead of
+always enabling WPScan. `--disable wpscan` overrides automatic mode. The web UI
+also makes enabled and automatic mutually exclusive. Automatic checks are
+restricted to matching web-service origins already in the nmap inventory.
+
+Target files accept bare IP addresses/hostnames, CIDRs, and IPv4 ranges—not URLs
+or `host:port` expressions. Equivalent hostnames/IP spellings are deduplicated,
+and rejected lines are reported rather than silently omitted. An uploaded file
+always takes precedence over the textarea, including when the file is empty.
+Invalid module names, numeric values, option selections, or argument quoting
+produce validation errors. Dry runs validate settings but never construct a scan
+engine; their command options match execution's root and rate-limit behavior.
+
 `--timeout N` **opts in** to bounding the nmap port + vuln NSE scans (default:
 untimed — those scans run as long as they need; set a positive N to kill them
 after N seconds). Other tools always run untimed.
@@ -188,9 +202,48 @@ From the **scans overview** page you can:
   confirmation is required; deletion only ever removes that scan's own
   `results_<customer>/<scan-id>/` directory.
 - **Resume** a scan that was interrupted (e.g. the server was restarted mid-run)
-  or that ended in error. Resume is **idempotent**: completed steps are detected
-  by their existing output (discovery artifacts, finished per-service tools) and
-  skipped, so only the unfinished work runs.
+  or that ended in error. Resume reuses only successful steps with a matching,
+  versioned checkpoint: effective command, declared input contents, tool identity,
+  and output integrity must still match. Valid empty results can be reused;
+  truncated, malformed, timed-out, or cancelled output cannot prove completion.
+  Old scans without checkpoints require confirmation before uncertain work is rerun.
+
+Queued/running scans cannot be resumed twice or deleted while active. Cancellation
+stops pending work and sends TERM to active tool process groups, allowing up to
+10 seconds to flush output before KILL. Untimed scans remain the default; the
+configured nmap deadline covers TCP, UDP, and background NSE consistently.
+
+Output capture uses fixed-size nonblocking reads. After forced termination, pipe
+draining and parent reaping each have a one-second bound. A descendant that
+deliberately starts a separate session can escape the tool's process group;
+an inherited pipe cannot keep the runner waiting indefinitely, and incomplete
+drain/cleanup is recorded for operator review.
+
+Artifact validation also limits memory: XML is checked incrementally, single
+JSON documents larger than 16 MiB and JSONL records larger than 1,048,576
+characters are retained but marked unverified rather than loaded without bound.
+These validation limits do not terminate scans or discard their output; affected
+attempts remain partial and cannot supply successful resume checkpoints.
+
+Each task has a stable identity and each execution has a separate attempt under
+`attempts/<task-id>/<attempt-id>/`, retaining stdout, stderr, result metadata,
+and artifacts. Existing artifact paths remain compatibility views for parsers.
+`logs/console.log` appends across resumes. Unknown nonzero exit codes are treated
+conservatively as failures, with valid partial findings retained for review.
+
+Execution completion and coverage completeness are separate: `done` does not mean
+every tool succeeded. The report and CLI explicitly show incomplete coverage,
+including skipped import-mode discovery, output-validation errors, and collection
+failures. Partial reports use completed immutable artifacts, not live tool writes.
+Automatic WordPress-triggered WPScan now requires its explicit configuration opt-in.
+
+Live status distinguishes execution from coverage. Planned disabled/unavailable
+modules stay visible, completed tools await correlation before claiming no
+findings, and incomplete coverage has a separate warning. Action availability
+comes from the API; polling continues through terminal cleanup, then stops.
+Connection failures use a separate message from scan failures, retry with a
+backoff, and disable stale action buttons. Missing or inaccessible scans stop
+polling. Old report files are not presented as ready during resumed/failed scans.
 
 On startup the app reconciles state: any scan still marked `running`/`queued`
 from a previous process is flagged `interrupted` so it can be resumed.
@@ -283,10 +336,101 @@ be removed from the overview page.
 ./run.sh test      # bootstraps the venv if needed, runs pytest
 ```
 
-Tests run anywhere (no scanning tools required) — they exercise the parsers
-against the committed sample outputs in `samples/`.
+The default suite blocks external scanner execution and notifications and uses
+temporary stores. It exercises sample parsers, CLI/web integration, checkpoint
+recovery, lifecycle races, report publication failures, and local fixture
+subprocesses for streaming/cancellation. It never scans sample targets even if
+scanning tools are installed. Real-tool compatibility testing remains a separate,
+explicitly authorized activity.
 
 ## Releasing
+
+Before release sign-off, run the opt-in integration verification below. The
+scanner-free unit/DOM suite does not establish installed-tool compatibility.
+
+### Browser and Kali verification (opt-in)
+
+`RECON_RESULTS_DIR` overrides the results parent for both web and CLI runs.
+Existing installations keep the project-root default when it is unset. An
+explicit `Store(base_dir=...)` takes precedence. Samples and templates always
+come from the source package, not the results directory. Browser fixtures set
+this override **before importing the app**, so startup reconciliation never
+touches existing scan workspaces.
+
+Install browser-only development dependencies deliberately; neither normal tests
+nor verification commands download them automatically:
+
+```bash
+.venv/bin/python -m pip install -r requirements-browser.txt
+.venv/bin/python -m playwright install chromium
+./run.sh test-browser
+```
+
+This runs real Chromium against a temporary localhost Flask server. Installed
+scanners and notifications remain blocked; lifecycle tests use a controlled
+local Python stdout fixture. Checks cover form uploads, effective previews,
+preview races, queue ownership, cancel/resume, polling failures, escaped
+diagnostics, dark/light presentation, and standalone downloaded reports.
+Browser requests outside the fixture origin are blocked. Failed checks save
+screenshots and Playwright traces; passing theme checks also save screenshots.
+
+The default suite still needs no browser or scanning tools. To retain a
+scanner-free baseline manifest alongside the browser evidence:
+
+```bash
+./run.sh test --verification-artifacts verification-artifacts
+```
+
+Real-tool checks require an **independently isolated Linux/Kali lab** with
+egress blocked, supported tools already installed, and explicit operator
+approval. This harness does not provision a VM, install scanners, configure a
+firewall, or prove the lab's isolation. The JSON approval fields are operator
+attestations. Never approve an ordinary workstation as an isolated lab.
+
+Copy `tests/compat/example.lab.json` to a gitignored file such as
+`verification.lab.local.json`, identify the actual lab, and set its approval
+and isolation attestations only after the lab is ready. The shipped example
+is deliberately unapproved and cannot run. No target addresses, extra command
+arguments, passive enumeration, brute-force modules, or remote templates are
+accepted by the harness.
+
+Inside the approved lab:
+
+```bash
+./run.sh test-kali --lab-config verification.lab.local.json
+```
+
+Checks target only dynamically allocated **owned loopback HTTP/TLS fixture
+services**. TLS uses a short-lived dummy certificate; private fixture keys stay
+in temporary directories, not evidence exports. User home/config/proxy settings
+are isolated. The initial allowlist covers nmap TCP **connect** discovery,
+httpx, nuclei with owned local templates and Interactsh/updates disabled,
+sslscan, and optional gowitness. Raw TCP/UDP and all other modules are rejected
+or remain unverified; no root/sudo scan is enabled implicitly.
+
+The harness records executable versions/checksums, commands, exit codes, raw
+logs, schema checks, checkpoint reuse, nuclei no-findings output, and httpx
+timeout/cancellation behavior. Missing tools are blocked, not compatible.
+The suite exits nonzero if any selected tool lacks its complete required
+checks—even when pytest itself only reports skips.
+
+Each run creates a unique, gitignored `verification-artifacts/<suite>-.../`
+directory. `manifest.json` is the compatibility matrix for **all 28 modules**:
+unexecuted modules remain unverified and `reliability_signoff` stays false.
+Evidence includes the base commit and source fingerprint for uncommitted
+changes, exact browser/tool versions, outcomes, and whether source changed
+during the run. Source changes during verification make the run fail.
+A dirty-source fingerprint is not a released commit claim.
+Use `--verification-artifacts <parent>` to choose another parent directory.
+Traces can be inspected with `.venv/bin/python -m playwright show-trace <trace.zip>`.
+
+Current readiness: automated scanner-free and Chromium verification can run
+locally; real-tool compatibility remains **unverified until executed in an
+approved lab**. Re-run all required suites against a committed release candidate
+before reliability sign-off. These checks do not close the separate
+authentication, CSRF, secret-redaction, or archive-limit workstreams.
+
+### Packaging a release
 
 Cut a versioned release as a clean, self-contained archive. The golden rule:
 **export from git, never zip the working folder.** `zip -r` and `tar` on the live
@@ -358,6 +502,11 @@ recon-runner/
 │   ├── commands.py             # command builder (config preview == executed command)
 │   ├── runner.py               # subprocess exec: timeout, capture, tee to <ws>/logs/
 │   ├── engine.py               # phase pipeline; background submit() + synchronous run_sync()
+│   ├── execution.py            # artifact contracts, scan-local context, outcome reduction
+│   ├── checkpoints.py          # versioned task completion + dependency/artifact integrity
+│   ├── lifecycle.py            # synchronized ownership, cancellation, lifecycle conflicts
+│   ├── collection.py           # fault-isolated parsing + typed collection results
+│   ├── snapshots.py            # immutable completed-artifact snapshots for reports
 │   ├── store.py                # per-customer persistence: results_<customer>/<scan-id>/
 │   ├── findings.py             # Finding model, dedup/merge, prioritization scoring
 │   ├── report.py               # build context + render report.html (dark/light)

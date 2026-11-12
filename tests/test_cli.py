@@ -4,7 +4,7 @@ import os
 import shutil
 
 from pentest import cli
-from pentest.store import BASE_DIR
+from pentest import store
 
 SAMPLE_XML = os.path.join(os.path.dirname(__file__), "..", "samples", "nmap_tcp.xml")
 
@@ -61,9 +61,9 @@ def test_bruteforce_confirm_flag():
     assert cfg.validate() == []  # confirm satisfied
 
 
-def test_nmap_xml_end_to_end(capsys):
+def test_nmap_xml_end_to_end(capsys, tmp_path):
     customer = "clitest_xml"
-    results = os.path.join(BASE_DIR, f"results_{customer}")
+    results = os.path.join(store.BASE_DIR, f"results_{customer}")
     shutil.rmtree(results, ignore_errors=True)
     try:
         rc = cli.main(["--customer", customer, "--nmap-xml", SAMPLE_XML,

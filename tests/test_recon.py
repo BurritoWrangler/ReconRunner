@@ -313,7 +313,7 @@ def test_gather_isolates_parser_failures(tmp_path, monkeypatch):
     # Make one parser blow up; _gather must still return the rest.
     def boom(*a, **k):
         raise RuntimeError("boom")
-    monkeypatch.setattr("pentest.engine.nuclei.parse", boom)
+    monkeypatch.setattr("pentest.collection.nuclei.parse", boom)
     inv, found, _exploits, web_apps = eng._gather(ws, state={"log": []})
     # dnsx still parsed despite nuclei raising.
     assert any(t == "dnsx" for f in found for t in f.source_tools)
@@ -357,7 +357,7 @@ def test_nuclei_stdout_captured_to_jsonl(tmp_path):
     spec = commands.CommandSpec(
         spec.label, ["sh", "-c", "printf '%s\n' '{\"template-id\":\"CVE-1\",\"info\":{\"name\":\"x\",\"severity\":\"high\"}}'; echo STATS 1>&2"],
         stdout_to=spec.stdout_to)
-    runner.run_spec(spec, str(tmp_path), timeout=30)
+    result = runner.run_spec(spec, str(tmp_path), timeout=30)
     out = (tmp_path / "nuclei.jsonl").read_text()
     assert "CVE-1" in out and "STATS" not in out   # clean JSONL, no stats
 
@@ -724,18 +724,18 @@ def test_run_spec_stdout_to_excludes_stderr(tmp_path):
     out = tmp_path / "o.txt"
     spec = CommandSpec("mix", ["sh", "-c", "echo OUT; echo ERR 1>&2"],
                        stdout_to=str(out))
-    runner.run_spec(spec, str(tmp_path), timeout=30)
+    result = runner.run_spec(spec, str(tmp_path), timeout=30)
     assert "OUT" in out.read_text() and "ERR" not in out.read_text()
-    assert "ERR" in (tmp_path / "logs" / "mix.log").read_text()  # stderr kept in log
+    assert "ERR" in open(result["log"]).read()  # stderr kept in unique attempt log
 
 
 def test_tail_helper(tmp_path):
-    import app as webapp
+    from pentest.execution import tail
     p = tmp_path / "c.log"
     p.write_text("\n".join("line%d" % i for i in range(500)) + "\n")
-    tail = webapp._tail(str(p), max_lines=10)
-    assert tail.splitlines()[-1] == "line499"
-    assert len(tail.splitlines()) == 10
+    text = tail(str(p), max_lines=10)
+    assert text.splitlines()[-1] == "line499"
+    assert len(text.splitlines()) == 10
 
 
 # ---- delete + resume --------------------------------------------------------
@@ -758,8 +758,8 @@ def _make_scan(store, customer="acme", status="queued"):
 def test_delete_scan_removes_only_that_workspace(tmp_path):
     from pentest.store import Store
     store = Store(base_dir=str(tmp_path))
-    keep_id, keep_ws = _make_scan(store)
-    drop_id, drop_ws = _make_scan(store)            # same customer -> same root
+    keep_id, keep_ws = _make_scan(store, status="done")
+    drop_id, drop_ws = _make_scan(store, status="done")
 
     assert store.delete_scan(drop_id) is True
     assert not os.path.exists(drop_ws)
@@ -803,15 +803,17 @@ def test_runner_resume_skips_when_output_present(tmp_path):
     from pentest import runner
     from pentest.commands import CommandSpec
     ws = str(tmp_path)
-    out = tmp_path / "x.json"
+    out = tmp_path / "x.txt"
     out.write_text("OLD")
     spec = CommandSpec("probe", ["printf", "NEW"], stdout_to=str(out))
 
     res = runner.run_spec(spec, ws, timeout=30, resume=True)
+    assert res["status"] == "ok"  # an unverified legacy file is not completion
+    assert out.read_text() == "NEW"
+    res = runner.run_spec(spec, ws, timeout=30, resume=True)
     assert res["status"] == "skipped"
-    assert out.read_text() == "OLD"            # command did not run
 
-    # Empty output does not count as complete -> the command runs.
+    # A changed artifact invalidates the checkpoint.
     out.write_text("")
     res = runner.run_spec(spec, ws, timeout=30, resume=True)
     assert res["status"] == "ok"
@@ -831,10 +833,12 @@ def test_runner_resume_satisfied_handles_nmap_oa(tmp_path):
     os.makedirs(tmp_path / "nmap")
     xml = tmp_path / "nmap" / "tcp.xml"
     xml.write_text("<nmaprun/>\n")
-    spec = CommandSpec("nmap_tcp",
-                       ["nmap", "-Pn", "-oA", f"{ws}/nmap/tcp",
-                        "-iL", f"{ws}/targets.txt"])
+    spec = commands.build_commands("nmap_tcp", {}, commands.Ctx(
+        ws=ws, targets_file=f"{ws}/targets.txt"))[0]
     assert f"{ws}/nmap/tcp.xml" in runner._resume_outputs(spec, ws)
+    assert runner._resume_satisfied(spec, ws) is False
+    from pentest import checkpoints
+    checkpoints.save(spec, ws, {"attempt_id": "seed", "returncode": 0})
     assert runner._resume_satisfied(spec, ws) is True
     xml.unlink()
     assert runner._resume_satisfied(spec, ws) is False
@@ -864,6 +868,10 @@ def test_engine_resume_skips_completed_discovery(tmp_path):
     # Seed a completed nmap_tcp artifact from the committed sample.
     os.makedirs(os.path.join(ws, "nmap"))
     shutil.copyfile(s("nmap_tcp.xml"), os.path.join(ws, "nmap", "tcp.xml"))
+    from pentest import checkpoints
+    spec = commands.build_commands("nmap_tcp", cfg.options("nmap_tcp"),
+                                   engine._ctx(ws))[0]
+    checkpoints.save(spec, ws, {"attempt_id": "seed", "returncode": 0})
 
     assert engine.resume(scan_id) == scan_id
     engine._queue.join()                 # wait for the background worker
@@ -871,12 +879,13 @@ def test_engine_resume_skips_completed_discovery(tmp_path):
     final = store.load_state(ws)
     assert final["status"] == "done"
     assert "resume" not in final         # the one-shot flag was consumed
-    assert "nmap_tcp" not in final["modules"]   # skipped: never executed/recorded
+    assert final["modules"]["nmap_tcp"]["runs"][-1]["status"] == "skipped"
     assert any("nmap_tcp already complete" in ln for ln in final["log"])
     assert final["inventory"]["services"]       # inventory built from seeded XML
     assert os.path.isfile(os.path.join(ws, "report.html"))
 
     assert engine.resume("unknown-id") is None
+    engine.shutdown()
 
 
 # ---- timeouts (only the initial port scans are bounded) ---------------------
@@ -908,7 +917,8 @@ def test_engine_timeout_only_for_port_scans():
     assert eng._timeout_for(cfg, "nmap_tcp") == 900
     assert eng._timeout_for(cfg, "nmap_udp") == 900
     # Everything else (incl. vuln scripts, httpx, nuclei, searchsploit) is untimed.
-    for mid in ("nmap_vuln", "httpx", "nuclei", "searchsploit", "sslscan"):
+    assert eng._timeout_for(cfg, "nmap_vuln") == 900
+    for mid in ("httpx", "nuclei", "searchsploit", "sslscan"):
         assert eng._timeout_for(cfg, mid) is None
     assert PORT_SCAN_MODULES == {"nmap_tcp", "nmap_udp"}
 
