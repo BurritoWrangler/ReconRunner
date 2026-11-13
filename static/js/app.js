@@ -124,6 +124,21 @@
     return h + "h " + (mm < 10 ? "0" : "") + mm + "m";
   }
 
+  function fmtAge(sec) {
+    sec = Math.max(0, Math.round(sec || 0));
+    if (sec < 60) return sec + "s ago";
+    var m = Math.floor(sec / 60), s = sec % 60;
+    if (m < 60) return m + "m " + (s < 10 ? "0" : "") + s + "s ago";
+    var h = Math.floor(m / 60), mm = m % 60;
+    return h + "h " + (mm < 10 ? "0" : "") + mm + "m ago";
+  }
+
+  function fmtBytes(bytes) {
+    var value = bytes || 0, units = ["B", "KiB", "MiB", "GiB"], i = 0;
+    while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
+    return (i ? value.toFixed(1) : value) + " " + units[i];
+  }
+
   function modStatusClass(s) {
     s = String(s || "");
     if (/error|timeout|failed|partial|cancel/.test(s)) return "mstat-warn";
@@ -213,6 +228,42 @@
     }
   }
 
+  function taskBadge(task) {
+    if (task.state === "orphaned")
+      return { cls: "mstat-missing", text: "process exited — orphaned attempt" };
+    if (task.state === "streaming")
+      return { cls: "mstat-ok", text: "streaming output" };
+    if (task.state === "quiet")
+      return { cls: "mstat-skip", text: "quiet " + fmtAge(task.seconds_since_output) };
+    return { cls: "mstat-warn", text: "no output " + fmtAge(task.seconds_since_output) };
+  }
+
+  function renderActive(data) {
+    var panel = document.getElementById("st-active");
+    if (!panel) return;
+    var tasks = data.active_tasks || [];
+    var live = ["queued", "running", "cancelling"].indexOf(data.status) >= 0;
+    var count = document.getElementById("st-active-count");
+    if (count) count.textContent = tasks.length ? tasks.length + " running" : "";
+    if (!tasks.length) {
+      panel.innerHTML = live ? "<p class='small muted'>No task is executing right now.</p>" : "";
+      return;
+    }
+    var html = "";
+    tasks.forEach(function (task) {
+      var badge = taskBadge(task);
+      html += "<div class='task-card'><div class='task-head'>" +
+        "<strong>" + esc(task.label) + "</strong>" +
+        "<span class='mstat " + badge.cls + "'>" + esc(badge.text) + "</span></div>" +
+        "<div class='runcmd'>" + esc(task.command || "") + "</div>" +
+        "<div class='small muted'>elapsed " + fmtDur(task.elapsed_seconds) +
+        " · pid " + esc(task.pid == null ? "—" : String(task.pid)) +
+        (task.process_alive ? " (alive)" : "") +
+        " · " + fmtBytes(task.output_bytes) + " captured</div></div>";
+    });
+    panel.innerHTML = html;
+  }
+
   function renderStatus(data) {
     window.__reconLast = data;
     var stt = document.getElementById("st-status");
@@ -240,6 +291,12 @@
     if (el && typeof data.elapsed_seconds === "number") {
       el.textContent = (data.status === "done" ? "took " : "elapsed ") + fmtDur(data.elapsed_seconds);
     }
+    var last = document.getElementById("st-last-output");
+    if (last) {
+      last.textContent = (typeof data.console_output_age === "number" &&
+        ["queued", "running", "cancelling"].indexOf(data.status) >= 0)
+        ? "last output " + fmtAge(data.console_output_age) : "";
+    }
 
     var prog = data.progress || { total: 0, completed: 0 };
     var pct = prog.total ? Math.min(100, Math.max(0, Math.round(((prog.completed || 0) / prog.total) * 100))) : (data.status === "done" ? 100 : 0);
@@ -249,6 +306,7 @@
     if (pl) pl.textContent = prog.total ? ("Phase 2: " + prog.completed + " / " + prog.total + " module tasks (" + pct + "%)") : "";
 
     renderModules(data);
+    renderActive(data);
 
     var log = document.getElementById("st-log");
     if (log && data.log) { log.textContent = data.log.join("\n"); log.scrollTop = log.scrollHeight; }

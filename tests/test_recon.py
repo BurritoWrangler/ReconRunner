@@ -888,6 +888,45 @@ def test_engine_resume_skips_completed_discovery(tmp_path):
     engine.shutdown()
 
 
+def test_resume_clears_stale_activity_markers(tmp_path):
+    """A crashed run leaves orphaned live-activity markers; a resumed run must
+    not inherit them."""
+    from pentest import activity, checkpoints
+    from pentest.engine import ScanEngine
+    from pentest.store import Store, new_scan_id
+    store = Store(base_dir=str(tmp_path))
+    engine = ScanEngine(store)
+    cfg = ScanConfig.defaults()
+    cfg.customer_name = "acme"
+    cfg.authorized = True
+    cfg.targets = ["192.0.2.10"]
+    for mid in list(cfg.modules):
+        cfg.modules[mid]["enabled"] = mid == "nmap_tcp"
+    scan_id = new_scan_id()
+    ws = store.create_workspace(cfg, scan_id)
+    state = store.initial_state(cfg, scan_id, ws)
+    state["status"] = "interrupted"
+    store.save_state(ws, state)
+    os.makedirs(os.path.join(ws, "nmap"))
+    shutil.copyfile(s("nmap_tcp.xml"), os.path.join(ws, "nmap", "tcp.xml"))
+    spec = commands.build_commands("nmap_tcp", cfg.command_options("nmap_tcp"),
+                                   engine._ctx(ws))[0]
+    checkpoints.save(spec, ws, {"attempt_id": "seed", "returncode": 0})
+    stale = os.path.join(ws, "active", "stale.json")
+    os.makedirs(os.path.dirname(stale))
+    with open(stale, "w", encoding="utf-8") as fh:
+        fh.write('{"pid": 999999999}')
+    assert activity.active_tasks(ws)[0]["state"] == "orphaned"
+
+    assert engine.resume(scan_id) == scan_id
+    engine._queue.join()
+
+    assert store.load_state(ws)["status"] == "done"
+    assert activity.active_tasks(ws) == []
+    assert not os.path.exists(stale)
+    engine.shutdown()
+
+
 # ---- timeouts (only the initial port scans are bounded) ---------------------
 
 def test_run_spec_untimed_runs_to_completion(tmp_path):

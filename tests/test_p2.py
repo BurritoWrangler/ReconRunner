@@ -218,6 +218,27 @@ def test_live_execution_does_not_claim_no_findings_before_correlation(web):
     assert row["status"] == "executed / awaiting correlation"
 
 
+def test_status_api_exposes_live_task_activity(web):
+    import os
+    import time
+    from pentest.checkpoints import atomic_json
+    app, client = web
+    sid, ws, state = scan_state(app, "running")
+    marker = Path(ws, "active", "a1.json")
+    marker.parent.mkdir(parents=True)
+    atomic_json(str(marker), {
+        "task_id": "t1", "attempt_id": "a1", "label": "nmap_tcp",
+        "command": "nmap -Pn -sT <b>", "started_at": time.time() - 45,
+        "pid": os.getpid()})
+    data = client.get(f"/api/scans/{sid}").json
+    assert data["console_output_age"] is None  # no console written yet
+    (task,) = data["active_tasks"]
+    assert task["label"] == "nmap_tcp" and task["process_alive"] is True
+    assert task["state"] == "quiet" and task["elapsed_seconds"] >= 44
+    marker.unlink()
+    assert client.get(f"/api/scans/{sid}").json["active_tasks"] == []
+
+
 def test_ipv6_service_urls_are_unambiguous():
     service = Service("2001:db8::1", 443, name="https")
     assert service.url() == "https://[2001:db8::1]:443"

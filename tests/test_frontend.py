@@ -32,4 +32,4 @@ def test_frontend_behavior():
         pytest.skip("Frontend behavior tests require Node or macOS JavaScriptCore.")
     result = subprocess.run(command, capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stderr
-    assert "13 frontend behavior checks passed" in result.stdout
+    assert "14 frontend behavior checks passed" in result.stdout

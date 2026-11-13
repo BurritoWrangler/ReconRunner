@@ -97,6 +97,11 @@ def test_newest_preview_wins_in_real_browser(browser_page, web_app, expect):
 def test_cancel_resume_and_incomplete_coverage(browser_page, web_app, expect):
     page = browser_page
     sid = start_controlled(page, web_app, expect)
+    expect(page.locator("#st-last-output")).to_contain_text("last output")
+    expect(page.locator("#st-active")).to_contain_text("nuclei-fixture")
+    expect(page.locator("#st-active")).to_contain_text("(alive)")
+    expect(page.locator("#st-active .task-card .runcmd").filter(
+        has_text="controlled_tool.py")).to_be_visible()
     page.locator("#cancel-action button").click()
     expect(page.locator("#st-status")).to_have_text("cancelling")
     expect(page.locator("#st-status")).to_have_text("cancelled")
@@ -106,6 +111,7 @@ def test_cancel_resume_and_incomplete_coverage(browser_page, web_app, expect):
     expect(page.locator("#st-status")).to_have_text("running")
     web_app.complete()
     expect(page.locator("#st-status")).to_have_text("done")
+    expect(page.locator("#st-active")).not_to_contain_text("nuclei-fixture")
     expect(page.locator("#report-link")).to_be_visible()
     expect(page.locator("#st-coverage-warning")).to_be_visible()
     expect(page.locator("#st-coverage")).to_contain_text("incomplete")

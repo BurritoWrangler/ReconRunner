@@ -33,10 +33,14 @@
     <span class="muted" id="st-phase">{{ state.phase }}</span>
     {% if state.demo %}<span class="tag">demo</span>{% endif %}
     <span class="small muted" id="st-elapsed"></span>
+    <span class="small muted" id="st-last-output"></span>
   </div>
   <div class="progress"><div class="bar" id="st-bar" style="width:0%"></div></div>
   <div class="small muted" id="st-progress"></div>
   <div class="small muted" id="st-modsum"></div>
+  <h3>Active tasks <span class="small muted" id="st-active-count"></span></h3>
+  <div id="st-active"></div>
+  <p class="small muted">Quiet stretches are normal for long-running tools (e.g. an untimed nmap sweep). A "process exited" badge on a lingering attempt means the engine died mid-task — that scan is flagged interrupted and can be resumed.</p>
   <div class="small muted" id="st-coverage">Coverage: {{ state.coverage_status or 'pending' }}</div>
   <div class="warn" id="st-coverage-warning" {% if state.coverage_status != 'incomplete' %}hidden{% endif %}>
     Execution completion does not guarantee complete coverage. Review failed or untested modules before relying on a clean result.
