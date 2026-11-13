@@ -223,6 +223,26 @@ var tests = [
     env.timers[0].fn();
     assert(env.timers.length === 1, "settled terminal scan kept polling");
     assert(env.element("resume-action").style.display === "inline", "resume never became available");
+  },
+  function activeTaskPanelShowsStatesAndClearsWhenDone() {
+    var env = environment();
+    env.ui.renderStatus({ status: "running", actions: {}, active_tasks: [
+      { label: "nmap_tcp", command: "nmap -Pn <b>", pid: 4242, process_alive: true,
+        state: "streaming", elapsed_seconds: 5, seconds_since_output: 2, output_bytes: 2048 },
+      { label: "nuclei", command: "nuclei -l x", pid: 999999, process_alive: false,
+        state: "orphaned", elapsed_seconds: 600, seconds_since_output: 600, output_bytes: 0 }
+    ] });
+    var html = env.element("st-active").innerHTML;
+    assert(html.indexOf("nmap_tcp") >= 0 && html.indexOf("nuclei") >= 0, "active tasks missing");
+    assert(html.indexOf("streaming output") >= 0, "streaming badge missing");
+    assert(html.indexOf("process exited") >= 0, "orphaned badge missing");
+    assert(html.indexOf("&lt;b&gt;") >= 0, "command HTML was not escaped");
+    assert(html.indexOf("2.0 KiB") >= 0, "captured volume missing");
+    assert(env.element("st-active-count").textContent.indexOf("2 running") >= 0, "running count missing");
+    env.ui.renderStatus({ status: "running", actions: {}, active_tasks: [] });
+    assert(env.element("st-active").innerHTML.indexOf("No task") >= 0, "running empty state missing");
+    env.ui.renderStatus({ status: "done", actions: {}, terminal: true, active_tasks: [] });
+    assert(env.element("st-active").innerHTML === "", "done scan did not clear the panel");
   }
 ];
 tests.forEach(function (test) { test(); });

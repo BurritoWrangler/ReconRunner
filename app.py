@@ -19,7 +19,7 @@ import time
 from flask import (Flask, Response, abort, flash, jsonify, redirect,
                    render_template, request, send_file, url_for)
 
-from pentest import archive, commands, coverage, tools
+from pentest import activity, archive, commands, coverage, tools
 from pentest.config import ScanConfig, option_errors
 from pentest.engine import ScanEngine
 from pentest.store import Store
@@ -159,6 +159,14 @@ def _scan_view(ws, state):
         state["coverage_status"] = "unverified"
     if not terminal or "coverage_rows" not in state:
         state["coverage_rows"] = coverage.coverage_rows(None, state)
+    # Live per-task activity (also for terminal scans: a stale marker with a
+    # dead PID is the visible trace of an engine crash mid-task).
+    state["active_tasks"] = activity.active_tasks(ws)
+    try:
+        state["console_output_age"] = round(
+            time.time() - os.path.getmtime(os.path.join(ws, "logs", "console.log")), 1)
+    except OSError:
+        state["console_output_age"] = None
     return state
 
 

@@ -174,6 +174,8 @@ table.runs th,table.runs td{padding:5px 9px;border-bottom:1px solid var(--line);
 table.runs th{font-size:10px;text-transform:uppercase;color:var(--muted);letter-spacing:.05em}
 table.runs tr:last-child td{border-bottom:none}
 .runcmd{font:12px/1.5 var(--mono);color:var(--term-ink);word-break:break-all}
+.task-card{border:1px solid var(--line);border-radius:7px;padding:8px 10px;margin:6px 0;background:var(--code-bg)}
+.task-head{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
 .sev-critical{background:var(--crit);color:#fff}
 .sev-high{background:var(--high);color:#1a0d02}
 .sev-medium{background:var(--med);color:#1a1600}

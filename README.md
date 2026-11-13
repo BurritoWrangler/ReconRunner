@@ -2,8 +2,8 @@
 
 A self-hosted web app that drives an **external network penetration test** from a
 single, per-scan configurable frontend. Upload a host file (one IP/FQDN per line),
-and the backend runs an NMAP discovery sweep (full TCP + top-1000 UDP), then fans
-out service-appropriate tooling and produces a self-contained, **actionable**
+and the backend runs an NMAP discovery sweep (full TCP + configurable UDP), then
+fans out service-appropriate tooling and produces a self-contained, **actionable**
 HTML report. Each prioritized finding carries a per-tool **proof block** — the
 tool name and its raw output snippet — so a pentester can validate and act on
 the report directly. The report also includes open services, live web
@@ -21,7 +21,7 @@ heuristic findings are flagged with a confidence percentage and a
 
 ```
 Config page ─▶ Phase 0: dnsx (resolve/validate)
-            ─▶ Phase 1: nmap full TCP + top-1000 UDP (+ vulners + high-impact NSE:
+            ─▶ Phase 1: nmap full TCP + configurable UDP (+ vulners + high-impact NSE:
               EternalBlue/BlueKeep/Cisco Smart Install/ftp-anon)
             ─▶ Phase 2: service-driven modules (gated by what nmap found open)
             ─▶ Phase 3: correlate + prioritize + outdated-software
@@ -194,6 +194,43 @@ nuclei -update-templates    # first run downloads templates
 Many tools require **root** for raw scans (nmap `-sS`, UDP). Run accordingly, or
 toggle the "running as root" option off to use nmap `-sT` connect scans.
 
+### Nmap scan performance
+
+nmap is single-threaded per process, so speed comes from probe parallelism,
+rate, and scope — not threads. The engine already runs TCP and UDP as two
+parallel processes and the vuln NSE scan in the background.
+
+Per-scan knobs (config page or `--set nmap_tcp.<key>=<value>`):
+
+- `timing` — already `T4` (nmap's "aggressive" template). `T5` is faster but
+  nmap's own docs call it "insane": it can miss open ports on lossy links.
+- `min_rate` — packets/second floor (`--min-rate`). The strongest raw-speed
+  knob; on WAN paths it can drop replies and trigger IDS.
+- `min_parallelism` — probes kept in flight (`--min-parallelism`), the closest
+  thing nmap has to threads.
+- `max_retries` — nmap retries up to 10 times by default; `1`–`2` greatly
+  speeds up lossy or filtered hosts at a small accuracy cost.
+- `version_intensity` — `2` approximates `--version-light`, cutting `-sV`
+  follow-up probes (nmap's default intensity is 7).
+- `all_ports` — untick for nmap's top-1,000 (~65× fewer probes). Full-range is
+  the external-pentest standard; treat this as a per-engagement choice.
+- `shards` — split the host list across N concurrent nmap processes (default
+  1). Since nmap is single-process, this is the only true multi-core speedup
+  for multi-host scopes. Shard XMLs are merged into the canonical
+  `nmap/tcp.xml`, a configured `--min-rate` is divided across shards so the
+  aggregate budget holds, and each shard is its own task — so resume skips
+  finished shards only. Changing the shard count invalidates per-shard
+  checkpoints.
+
+UDP defaults favor speed: `top_ports` 250 (raise to 1,000 for broader
+coverage) and version detection off — service names still come from the port
+scan, and UDP `-sV` retransmits are the slowest part of discovery. Enable
+`nmap_udp.version_detection` for UDP product/version probing.
+
+A two-phase sweep (fast top-1,000 first, full range in the background) was
+considered and deliberately deferred: services found only by the full-range
+pass would otherwise miss Phase-2 gating, which would understate coverage.
+
 ## Managing scans (delete & resume)
 
 From the **scans overview** page you can:
@@ -244,6 +281,15 @@ comes from the API; polling continues through terminal cleanup, then stops.
 Connection failures use a separate message from scan failures, retry with a
 backoff, and disable stale action buttons. Missing or inaccessible scans stop
 polling. Old report files are not presented as ready during resumed/failed scans.
+
+The status page also shows **active tasks**: every executing command with its
+elapsed time, seconds since its last output, captured output volume, PID, and
+whether that process is still alive. Output states are `streaming` (<10s since
+last output), `quiet` (<2m), and `silent` (≥2m) — reported as data, not verdicts,
+because long silences are normal for untimed nmap sweeps. A "process exited"
+badge on a lingering attempt means the engine died mid-task: that scan is
+flagged interrupted on the next startup and can be resumed, and stale markers
+are cleared when the scan restarts.
 
 On startup the app reconciles state: any scan still marked `running`/`queued`
 from a previous process is flagged `interrupted` so it can be resumed.
